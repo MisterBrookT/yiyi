@@ -44,7 +44,11 @@ copied automatically. <kbd>esc</kbd> closes it; <kbd>⌘</kbd><kbd>c</kbd> copie
 Global hotkeys are registered with Carbon, so they respond to real key presses only —
 synthetic `System Events` keystrokes do not reach them.
 
-## Configuration
+## Settings and configuration
+
+Choose **Settings…** from the menu (or press <kbd>⌘</kbd><kbd>,</kbd>) to configure yiyi without editing JSON. Changes are saved immediately. The window lets you choose DeepSeek or Qwen as the default, set each provider's model, API key, optional temperature, and reasoning effort, and shows where its key resolves from without revealing it.
+
+Each shortcut has an editable name, provider/model and reasoning-effort overrides, prompt template, and a click-to-record hotkey. Press Escape while recording to cancel or Delete to clear it. Prompts must contain `{selection}` or `{input}`; invalid templates are marked inline. Commands can be added and removed.
 
 On first launch yiyi creates `~/.config/yiyi/config.json` with these exact defaults:
 
@@ -65,46 +69,39 @@ On first launch yiyi creates `~/.config/yiyi/config.json` with these exact defau
   ],
   "defaultProvider" : "deepseek",
   "providers" : {
-    "ark" : {
-      "apiKeyEnv" : "ARK_API_KEY",
-      "baseURL" : "https://ark.cn-beijing.volces.com/api/v3",
-      "model" : "doubao-1-5-lite-32k-250115"
-    },
     "deepseek" : {
       "apiKeyEnv" : "DEEPSEEK_API_KEY",
       "baseURL" : "https://api.deepseek.com/v1",
-      "model" : "deepseek-v4-flash"
-    },
-    "openrouter" : {
-      "apiKeyEnv" : "OPENROUTER_API_KEY",
-      "baseURL" : "https://openrouter.ai/api/v1",
-      "model" : "google/gemini-2.5-flash-lite"
+      "model" : "deepseek-v4-flash",
+      "reasoningEffort" : "none"
     },
     "qwen" : {
       "apiKeyEnv" : "DASHSCOPE_API_KEY",
       "baseURL" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "model" : "qwen-plus"
+      "model" : "qwen-plus",
+      "reasoningEffort" : "none"
     }
-  }
+  },
+  "superKey" : "none"
 }
 ```
 
-A command's optional `provider` and `model` override the selected default. For example: `{"provider":"qwen","model":"qwen-mt-turbo"}` (optional; requires a Qwen key). Every prompt must contain `{selection}` or `{input}`. Hotkeys accept `cmd`, `shift`, `ctrl`, and `opt` plus a key, such as `ctrl+opt+t`.
+A command's optional `provider`, `model`, and `reasoningEffort` override the selected default. Every prompt must contain `{selection}` or `{input}`. Standard hotkeys accept `cmd`, `shift`, `ctrl`, and `opt` plus a key, such as `ctrl+opt+t`.
 
-Choose an available default from the menu's **Provider** submenu. Providers without a key are disabled and explain what is missing. **Edit config…** opens the file; **Reload config** applies changes and re-registers hotkeys without a restart.
+The **Superkey** setting can turn Right Command, Right Option, or Right Control into a leader key. Bind commands with syntax such as `super+t`; while the leader is held, yiyi consumes that bound key instead of passing it to the frontmost app. Superkey bindings require yiyi to be enabled in **Privacy & Security → Accessibility**. If access is unavailable, the Settings status explains why and normal Carbon shortcuts and clipboard-only translation keep working.
 
-Provider key lookup order is `providers.<name>.apiKey`, its `apiKeyEnv` process environment variable, the same variable in `~/.config/yiyi/.env`, then `~/.config/yiyi/apikey` for the default provider only. Keys are never logged.
+**Edit config…** opens the underlying file; **Reload config** applies external changes. Existing custom providers remain supported when loaded, although the shipped provider set is DeepSeek and Qwen.
+
+Provider key lookup order is `providers.<name>.apiKey`, its `apiKeyEnv` process environment variable, the same variable in `~/.config/yiyi/.env`, then `~/.config/yiyi/apikey` for the default provider only. Keys are never displayed or logged. An empty temperature omits `temperature` from requests; reasoning effort `none` omits `reasoning_effort`.
 
 ## Providers
 
-| Provider | Default model | Key setting | Available on this machine |
-| --- | --- | --- | --- |
-| OpenRouter | `google/gemini-2.5-flash-lite` | `OPENROUTER_API_KEY` | Yes |
-| DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | Yes |
-| Qwen / DashScope | `qwen-plus` | `DASHSCOPE_API_KEY` | No |
-| Ark | `doubao-1-5-lite-32k-250115` | `ARK_API_KEY` | No |
+| Provider | Default model | Key setting |
+| --- | --- | --- |
+| DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
+| Qwen / DashScope | `qwen-plus` | `DASHSCOPE_API_KEY` |
 
-To enable Qwen or DeepSeek for a Finder/login-launched app, add `DASHSCOPE_API_KEY=...` or `DEEPSEEK_API_KEY=...` to `~/.config/yiyi/.env`. Alternatively, put the key in `providers.qwen.apiKey` or `providers.deepseek.apiKey` in `~/.config/yiyi/config.json`, then choose **Reload config**. Shell-exported variables work when yiyi is launched from that shell.
+To enable either provider for a Finder/login-launched app, add `DASHSCOPE_API_KEY=...` or `DEEPSEEK_API_KEY=...` to `~/.config/yiyi/.env`. Alternatively, enter the key securely in Settings. Shell-exported variables work when yiyi is launched from that shell.
 
 ## Build and smoke test
 

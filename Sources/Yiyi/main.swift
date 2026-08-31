@@ -15,6 +15,14 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--translate" {
         } catch { fputs("yiyi: \(error.localizedDescription)\n", stderr); exit(1) }
     }
     RunLoop.main.run()
+} else if let journeyIndex = CommandLine.arguments.firstIndex(of: "--ui-journey"), CommandLine.arguments.indices.contains(journeyIndex + 1) {
+    let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
+    do {
+        try runUIJourney(outdir: URL(fileURLWithPath: CommandLine.arguments[journeyIndex + 1], isDirectory: true))
+        exit(0)
+    } catch {
+        fputs("yiyi ui journey: \(error.localizedDescription)\n", stderr); exit(1)
+    }
 } else if CommandLine.arguments.contains("--preview") {
     let app = NSApplication.shared; app.setActivationPolicy(.regular)
     if CommandLine.arguments.contains("dark") { app.appearance = NSAppearance(named: .darkAqua) }

@@ -33,6 +33,21 @@ public func parseChatCompletion(_ data: Data) throws -> String {
     return text
 }
 
+public func buildChatCompletionBody(prompt: String, provider: ResolvedProvider) throws -> Data {
+    var body: [String: Any] = [
+        "model": provider.model,
+        "messages": [["role": "user", "content": prompt]],
+        "max_tokens": 1024
+    ]
+    if let temperature = provider.temperature {
+        body["temperature"] = temperature
+    }
+    if provider.reasoningEffort != .none {
+        body["reasoning_effort"] = provider.reasoningEffort.rawValue
+    }
+    return try JSONSerialization.data(withJSONObject: body)
+}
+
 public struct OpenAIClient: Sendable {
     public init() {}
     public func complete(prompt: String, provider: ResolvedProvider, apiKey: String) async throws -> String {
@@ -43,7 +58,7 @@ public struct OpenAIClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("yiyi", forHTTPHeaderField: "X-Title")
         request.timeoutInterval = 60
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": provider.model, "messages": [["role": "user", "content": prompt]], "temperature": 0.2, "max_tokens": 1024])
+        request.httpBody = try buildChatCompletionBody(prompt: prompt, provider: provider)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw OpenAIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {

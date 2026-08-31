@@ -7,6 +7,8 @@ extension Notification.Name { static let yiyiHotkey = Notification.Name("cc.blac
 @MainActor final class HotkeyManager {
     private var refs: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
+    private let superKeyMonitor = SuperKeyMonitor()
+    var superKeyStatus: String { superKeyMonitor.status }
 
     init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -18,16 +20,21 @@ extension Notification.Name { static let yiyiHotkey = Notification.Name("cc.blac
         }, 1, &spec, nil, &handler)
     }
 
-    func register(_ commands: [CommandConfig]) -> [String] {
+    func register(_ commands: [CommandConfig], superKey: SuperKey) -> [String] {
         unregisterAll()
+        superKeyMonitor.configure(superKey: superKey, commands: commands)
         var errors: [String] = []
         for (index, command) in commands.enumerated() {
             do {
-                let parsed = try parseHotkey(command.hotkey)
-                var ref: EventHotKeyRef?
-                let status = RegisterEventHotKey(parsed.keyCode, parsed.modifiers, EventHotKeyID(signature: fourCC("YIYI"), id: UInt32(index)), GetApplicationEventTarget(), 0, &ref)
-                if status == noErr, let ref { refs.append(ref); NSLog("yiyi: registered %@ (%@), OSStatus=%d", command.name, command.hotkey, status) }
-                else { errors.append("\(command.name): RegisterEventHotKey OSStatus \(status)") }
+                switch try parseBinding(command.hotkey) {
+                case let .carbon(parsed):
+                    var ref: EventHotKeyRef?
+                    let status = RegisterEventHotKey(parsed.keyCode, parsed.modifiers, EventHotKeyID(signature: fourCC("YIYI"), id: UInt32(index)), GetApplicationEventTarget(), 0, &ref)
+                    if status == noErr, let ref { refs.append(ref); NSLog("yiyi: registered %@ (%@), OSStatus=%d", command.name, command.hotkey, status) }
+                    else { errors.append("\(command.name): RegisterEventHotKey OSStatus \(status)") }
+                case .superKey:
+                    break
+                }
             } catch { errors.append("\(command.name): invalid hotkey '\(command.hotkey)' (\(error))") }
         }
         return errors

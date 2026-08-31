@@ -4,6 +4,7 @@ import YiyiCore
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private let configs = ConfigManager(), hotkeys = HotkeyManager(), panel = ResultPanelController()
+    private lazy var settings = SettingsWindowController(configs: configs) { [weak self] in self?.hotkeys.superKeyStatus ?? "off" }
     private var statusItem: NSStatusItem!
     private var lastResult: String?
     private var didRequestAccessibility = false
@@ -14,6 +15,7 @@ import YiyiCore
             let index = note.object as? Int ?? 0
             Task { @MainActor in self?.runCommand(index: index) }
         }
+        configs.onChange = { [weak self] in self?.configDidChange() }
         reloadConfig(showErrors: true)
         if !SelectionCapture.isTrusted(prompt: false), !UserDefaults.standard.bool(forKey: "yiyi.onboarded") {
             UserDefaults.standard.set(true, forKey: "yiyi.onboarded")
@@ -43,6 +45,7 @@ import YiyiCore
         }
         let providerParent = NSMenuItem(title: "Provider", action: nil, keyEquivalent: ""); providerParent.submenu = providers; menu.addItem(providerParent)
         menu.addItem(.separator())
+        add("Settings…", action: #selector(openSettings), key: ",", to: menu)
         add("Edit config…", action: #selector(editConfig), to: menu)
         add("Reload config", action: #selector(reload), to: menu)
         let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
@@ -62,6 +65,7 @@ import YiyiCore
     @objc private func runMenuCommand(_ sender: NSMenuItem) { runCommand(index: sender.tag) }
     @objc private func reload() { reloadConfig(showErrors: true) }
     @objc private func editConfig() { NSWorkspace.shared.open(configs.fileURL) }
+    @objc private func openSettings() { settings.show() }
     @objc private func copyLast() { if let lastResult { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(lastResult, forType: .string) } }
     @objc private func selectProvider(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
@@ -76,9 +80,15 @@ import YiyiCore
 
     private func reloadConfig(showErrors: Bool) {
         do {
-            try configs.load(); let errors = hotkeys.register(configs.config.commands); rebuildMenu()
+            try configs.load(); let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey); rebuildMenu()
             if showErrors, !errors.isEmpty { panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n")) }
         } catch { panel.showError(message: "Config could not be loaded", detail: error.localizedDescription) }
+    }
+
+    private func configDidChange() {
+        let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
+        rebuildMenu()
+        if !errors.isEmpty { panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n")) }
     }
 
     private func runCommand(index: Int) {
