@@ -26,7 +26,7 @@ extension Notification.Name { static let yiyiHotkey = Notification.Name("cc.blac
         var errors: [String] = []
         for (index, command) in commands.enumerated() {
             do {
-                switch try parseBinding(command.hotkey) {
+                switch try effectiveBinding(command.hotkey, superKey: superKey) {
                 case let .carbon(parsed):
                     var ref: EventHotKeyRef?
                     let status = RegisterEventHotKey(parsed.keyCode, parsed.modifiers, EventHotKeyID(signature: fourCC("YIYI"), id: UInt32(index)), GetApplicationEventTarget(), 0, &ref)

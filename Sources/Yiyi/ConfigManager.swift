@@ -15,6 +15,7 @@ import YiyiCore
         if FileManager.default.fileExists(atPath: fileURL.path) {
             config = try JSONDecoder().decode(YiyiConfig.self, from: Data(contentsOf: fileURL))
         }
+        _ = migrateLegacySuperKeyBindings(in: &config)
         try save()
     }
 

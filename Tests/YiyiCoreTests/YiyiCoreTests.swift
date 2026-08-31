@@ -4,12 +4,14 @@ import XCTest
 final class YiyiCoreTests: XCTestCase {
 
     func testAccessibilityAdviceMatrix() {
-        XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: false, grantedSignature: nil, currentSignature: "current"), .ok)
-        XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: true, grantedSignature: "old", currentSignature: "current"), .ok)
-        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: false, grantedSignature: nil, currentSignature: "current"), .promptOnce)
-        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: "old", currentSignature: "current"), .staleGrant)
-        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: "current", currentSignature: "current"), .awaitGrant)
-        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: nil, currentSignature: "current"), .awaitGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: false, repairAttempted: false, grantedSignature: nil, currentSignature: "current"), .ok)
+        XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: true, repairAttempted: true, grantedSignature: "old", currentSignature: "current"), .ok)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: false, repairAttempted: false, grantedSignature: nil, currentSignature: "current"), .promptOnce)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, repairAttempted: false, grantedSignature: "old", currentSignature: "current"), .repairStaleGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, repairAttempted: false, grantedSignature: "current", currentSignature: "current"), .repairStaleGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, repairAttempted: false, grantedSignature: nil, currentSignature: "current"), .repairStaleGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: false, repairAttempted: false, grantedSignature: "old", currentSignature: "current"), .repairStaleGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, repairAttempted: true, grantedSignature: nil, currentSignature: "current"), .awaitGrant)
     }
 
     func testSelectionCaptureUsesAdvancedNonEmptySelection() {
@@ -91,6 +93,34 @@ final class YiyiCoreTests: XCTestCase {
             .carbon(ParsedHotkey(keyCode: 27, modifiers: HotkeyModifier.cmd))
         )
         XCTAssertThrowsError(try parseBinding("super+banana"))
+    }
+
+    func testSuperKeyBindingRoundTripsAndLegacyHyperRemainsCompatible() throws {
+        let serialized = try XCTUnwrap(formatSuperKeyBinding(keyCode: 27))
+        XCTAssertEqual(serialized, "super+-")
+        XCTAssertEqual(try parseBinding(serialized), .superKey(keyCode: 27))
+        XCTAssertEqual(
+            try effectiveBinding("cmd+shift+opt+ctrl+-", superKey: .rightCommand),
+            .superKey(keyCode: 27)
+        )
+        XCTAssertEqual(
+            try effectiveBinding("cmd+shift+opt+ctrl+-", superKey: .none),
+            .carbon(ParsedHotkey(
+                keyCode: 27,
+                modifiers: HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control
+            ))
+        )
+    }
+
+    func testLegacyHyperBindingMigratesOnceWithoutChangingOtherCommands() {
+        var config = YiyiConfig(superKey: .rightCommand, commands: [
+            CommandConfig(name: "Chinese", hotkey: "cmd+shift+opt+ctrl+-", prompt: "{selection}"),
+            CommandConfig(name: "English", hotkey: "cmd+shift+-", prompt: "{selection}")
+        ])
+        XCTAssertTrue(migrateLegacySuperKeyBindings(in: &config))
+        XCTAssertEqual(config.commands.map(\.hotkey), ["super+-", "cmd+shift+-"])
+        XCTAssertFalse(migrateLegacySuperKeyBindings(in: &config))
+        XCTAssertEqual(config.commands.map(\.hotkey), ["super+-", "cmd+shift+-"])
     }
 
     func testFormattedHotkeysRoundTrip() throws {

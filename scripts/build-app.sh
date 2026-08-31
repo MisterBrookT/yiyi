@@ -108,6 +108,7 @@ trap 'rm -rf "$STAGED_APP"' EXIT
 mkdir -p "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
 cp "$BIN" "$STAGED_APP/Contents/MacOS/yiyi"
 cp Info.plist "$STAGED_APP/Contents/Info.plist"
+cp "$ROOT/Resources/AppIcon.icns" "$STAGED_APP/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$STAGED_APP/Contents/PkgInfo"
 chmod +x "$STAGED_APP/Contents/MacOS/yiyi"
 xattr -cr "$STAGED_APP"

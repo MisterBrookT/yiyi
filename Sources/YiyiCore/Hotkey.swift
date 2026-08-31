@@ -88,6 +88,35 @@ public func parseBinding(_ value: String) throws -> HotkeyBinding {
     return .carbon(try parseHotkey(value))
 }
 
+public func effectiveBinding(_ value: String, superKey: SuperKey) throws -> HotkeyBinding {
+    let binding = try parseBinding(value)
+    guard superKey != .none,
+          case let .carbon(parsed) = binding,
+          parsed.modifiers == (HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control)
+    else { return binding }
+    return .superKey(keyCode: parsed.keyCode)
+}
+
+public func formatSuperKeyBinding(keyCode: UInt32) -> String? {
+    canonicalKeyNames[keyCode].map { "super+\($0)" }
+}
+
+@discardableResult
+public func migrateLegacySuperKeyBindings(in config: inout YiyiConfig) -> Bool {
+    guard config.superKey != .none else { return false }
+    let legacyModifiers = HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control
+    var changed = false
+    for index in config.commands.indices {
+        guard case let .carbon(parsed) = try? parseBinding(config.commands[index].hotkey),
+              parsed.modifiers == legacyModifiers,
+              let canonical = formatSuperKeyBinding(keyCode: parsed.keyCode)
+        else { continue }
+        config.commands[index].hotkey = canonical
+        changed = true
+    }
+    return changed
+}
+
 /// Formats modifiers in the canonical order: command, shift, option, control.
 public func formatHotkey(keyCode: UInt32, modifiers: UInt32) -> String {
     var parts: [String] = []

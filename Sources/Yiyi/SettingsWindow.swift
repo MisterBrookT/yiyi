@@ -23,8 +23,10 @@ import YiyiCore
     private let configs: ConfigManager
     private let accessibilityStatus: () -> AccessibilityStatus
     private let requestAccessibility: () -> Void
+    private let repairAccessibility: () -> Void
     private let sidebar = SettingsSidebarTableView()
     private let sidebarScroll = NSScrollView()
+    private let sidebarMaterial = SettingsSidebarBackgroundView()
     private let detail = SettingsBackgroundView()
     private var paneView: NSView?
     private var selectedProvider: String
@@ -34,13 +36,19 @@ import YiyiCore
     private let labelWidth: CGFloat = 150
     private let controlWidth: CGFloat = 370
 
-    init(configs: ConfigManager, accessibilityStatus: @escaping () -> AccessibilityStatus, requestAccessibility: @escaping () -> Void) {
+    init(
+        configs: ConfigManager,
+        accessibilityStatus: @escaping () -> AccessibilityStatus,
+        requestAccessibility: @escaping () -> Void,
+        repairAccessibility: @escaping () -> Void
+    ) {
         self.configs = configs
         self.accessibilityStatus = accessibilityStatus
         self.requestAccessibility = requestAccessibility
+        self.repairAccessibility = repairAccessibility
         selectedProvider = configs.config.defaultProvider
         selectedPane = UserDefaults.standard.string(forKey: Self.lastPaneKey).flatMap(Pane.init(rawValue:)) ?? .provider
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 770, height: 500), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 770, height: 500), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -53,7 +61,6 @@ import YiyiCore
     func show() {
         rebuild(resize: true, animate: false)
         if !centered { window?.center(); centered = true }
-        showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
@@ -64,22 +71,18 @@ import YiyiCore
         let sidebarController = NSViewController()
         sidebarScroll.hasVerticalScroller = false
         sidebarScroll.drawsBackground = false
+        sidebarScroll.contentView.drawsBackground = false
         sidebar.headerView = nil
         sidebar.style = .sourceList
-        sidebar.backgroundColor = .windowBackgroundColor
+        sidebar.backgroundColor = .clear
         sidebar.rowSizeStyle = .medium
         sidebar.dataSource = self
         sidebar.delegate = self
-        sidebar.setAccessibilityIdentifier("settings.sidebar")
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("pane"))
         column.resizingMask = .autoresizingMask
         column.width = 180
         sidebar.addTableColumn(column)
         sidebarScroll.documentView = sidebar
-        let sidebarMaterial = NSVisualEffectView()
-        sidebarMaterial.material = .sidebar
-        sidebarMaterial.blendingMode = .withinWindow
-        sidebarMaterial.state = .active
         sidebarMaterial.addSubview(sidebarScroll)
         sidebarScroll.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -247,10 +250,19 @@ import YiyiCore
 
     private func superkeyPane() -> NSView {
         let leader = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
-        let tap = label(accessibilityStatus().superKeyTapStatus, mono: true); tap.setAccessibilityIdentifier("superkey.tap"); tap.setAccessibilityValue(accessibilityStatus().superKeyTapStatus)
+        let tapStatus = accessibilityStatus().superKeyTapStatus
+        let tap = label(tapStatus, mono: true)
+        tap.maximumNumberOfLines = 0
+        tap.usesSingleLineMode = false
+        tap.lineBreakMode = .byWordWrapping
+        tap.preferredMaxLayoutWidth = controlWidth
+        tap.setAccessibilityIdentifier("superkey.tap")
+        tap.setAccessibilityValue(tapStatus)
+        stretch(tap)
+        tap.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
         var rows = [row("Leader modifier", leader), row("Tap availability", tap)]
         for (index, command) in configs.config.commands.enumerated() {
-            let binding = HotkeyRecorder(value: command.hotkey); binding.onCommit = { [weak self] value in try? self?.configs.setCommand(index, hotkey: value) }; binding.setAccessibilityIdentifier("superkey.command.\(index).binding")
+            let binding = HotkeyRecorder(value: command.hotkey, recordsSuperKey: true); binding.onCommit = { [weak self] value in try? self?.configs.setCommand(index, hotkey: value) }; binding.setAccessibilityIdentifier("superkey.command.\(index).binding")
             rows.append(row(command.name, binding))
         }
         return section("Superkey", rows: rows)
@@ -261,10 +273,10 @@ import YiyiCore
         let trusted = label(status.trusted ? "Yes" : "No", mono: true); trusted.setAccessibilityIdentifier("permission.trusted"); trusted.setAccessibilityValue(status.trusted ? "yes" : "no")
         let signature = label(status.signatureIdentity, mono: true); signature.maximumNumberOfLines = 3; signature.lineBreakMode = .byWordWrapping; signature.setAccessibilityIdentifier("permission.signature"); signature.setAccessibilityValue(status.signatureIdentity); stretch(signature)
         var rows = [row("Accessibility trusted", trusted), row("Signing identity", signature)]
-        if status.advice == .staleGrant {
-            let warning = label("The grant belongs to an earlier yiyi build. Turn yiyi off and on again in System Settings → Privacy & Security → Accessibility."); warning.maximumNumberOfLines = 4; warning.lineBreakMode = .byWordWrapping; warning.textColor = Theme.attention; warning.setAccessibilityIdentifier("permission.stale-grant"); stretch(warning); warning.heightAnchor.constraint(equalToConstant: 54).isActive = true; rows.append(row("", warning))
-        }
-        if !status.trusted {
+        if status.advice == .repairStaleGrant {
+            let warning = label("The existing grant belongs to an older yiyi build and will be re-requested."); warning.maximumNumberOfLines = 0; warning.usesSingleLineMode = false; warning.lineBreakMode = .byWordWrapping; warning.textColor = Theme.attention; warning.setAccessibilityIdentifier("permission.stale-grant"); stretch(warning); warning.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true; rows.append(row("", warning))
+            let repair = NSButton(title: "Repair Accessibility Permission…", target: self, action: #selector(repairAccessibilityPermission)); repair.setAccessibilityIdentifier("permission.repair"); rows.append(row("", repair))
+        } else if !status.trusted {
             let enable = NSButton(title: "Enable Accessibility…", target: self, action: #selector(enableAccessibility)); enable.setAccessibilityIdentifier("permission.enable"); rows.append(row("", enable))
         }
         return section("Accessibility", rows: rows)
@@ -326,6 +338,7 @@ import YiyiCore
     @objc private func changeSuperKey(_ sender: NSPopUpButton) { guard let selected = sender.titleOfSelectedItem, let value = SuperKey.allCases.first(where: { $0.displayName == selected }) else { return }; try? configs.setSuperKey(value); rebuild() }
     @objc private func changeAutoCopy(_ sender: NSButton) { try? configs.setAutoCopy(sender.state == .on) }
     @objc private func enableAccessibility() { requestAccessibility(); rebuild() }
+    @objc private func repairAccessibilityPermission() { repairAccessibility(); rebuild() }
     @objc private func addCommand() { try? configs.addCommand(); rebuild() }
     @objc private func removeCommand(_ sender: NSButton) { try? configs.deleteCommand(at: sender.tag); rebuild() }
     @objc private func commitField(_ sender: NSTextField) {
@@ -346,9 +359,11 @@ import YiyiCore
     func prepareOffscreen(appearance: NSAppearance) {
         window?.appearance = appearance
         window?.contentView?.appearance = appearance
+        sidebarMaterial.appearance = appearance
         sidebar.appearance = appearance
         sidebarScroll.appearance = appearance
-        window?.contentView?.layoutSubtreeIfNeeded()
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        sidebar.backgroundColor = dark ? NSColor(calibratedWhite: 0.14, alpha: 1) : .underPageBackgroundColor
         let sidebarHeight = max(window?.contentLayoutRect.height ?? 500, CGFloat(Pane.allCases.count) * 28)
         sidebar.frame = NSRect(x: 0, y: 0, width: 180, height: sidebarHeight)
         sidebar.sizeLastColumnToFit()
@@ -367,6 +382,7 @@ import YiyiCore
         rebuild(resize: true, animate: false)
         window?.contentView?.layoutSubtreeIfNeeded()
     }
+    var installedPaneCount: Int { detail.subviews.count }
     func control(accessibilityID: String) -> NSView? { window?.contentView.flatMap { root in ([root] + root.allSubviews).first { $0.accessibilityIdentifier() == accessibilityID } } }
     func renderPNG(to url: URL, bottom: Bool = false) throws {
         guard let content = window?.contentView else { return }
@@ -432,10 +448,23 @@ import YiyiCore
     func textDidEndEditing(_ notification: Notification) { guard let text = notification.object as? NSTextView, let id = text.identifier?.rawValue, let index = Int(id.split(separator: ".").last ?? "") else { return }; try? configs.setCommand(index, prompt: text.string); rebuild() }
     func windowShouldClose(_ sender: NSWindow) -> Bool { true }
 }
+private final class SettingsWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 private final class SettingsDocumentView: NSView {
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill()
+        dirtyRect.fill()
+    }
+}
+
+private final class SettingsSidebarBackgroundView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        (dark ? NSColor(calibratedWhite: 0.14, alpha: 1) : NSColor.underPageBackgroundColor).setFill()
         dirtyRect.fill()
     }
 }
@@ -454,7 +483,8 @@ private final class SettingsBackgroundView: NSView {
 @MainActor private final class HotkeyRecorder: NSButton {
     var onCommit: ((String) -> Void)?
     private var recording = false
-    init(value: String) { super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
+    private let recordsSuperKey: Bool
+    init(value: String, recordsSuperKey: Bool = false) { self.recordsSuperKey = recordsSuperKey; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
     required init?(coder: NSCoder) { nil }
     @objc private func beginRecording() { recording = true; title = "Press shortcut…"; window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
@@ -462,6 +492,11 @@ private final class SettingsBackgroundView: NSView {
         guard recording else { super.keyDown(with: event); return }
         if event.keyCode == 53 { recording = false; title = "Record Shortcut"; return }
         if event.keyCode == 51 || event.keyCode == 117 { recording = false; title = "Record Shortcut"; onCommit?(""); return }
+        if recordsSuperKey {
+            guard let value = formatSuperKeyBinding(keyCode: UInt32(event.keyCode)) else { NSSound.beep(); return }
+            recording = false; title = value; onCommit?(value)
+            return
+        }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         var modifiers: UInt32 = 0
         if flags.contains(.command) { modifiers |= UInt32(cmdKey) }; if flags.contains(.option) { modifiers |= UInt32(optionKey) }; if flags.contains(.control) { modifiers |= UInt32(controlKey) }; if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }

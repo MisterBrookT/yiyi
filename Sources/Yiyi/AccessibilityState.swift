@@ -13,6 +13,7 @@ struct AccessibilityStatus {
 @MainActor enum AccessibilityState {
     static let hasPromptedKey = "yiyi.accessibility.hasPrompted"
     static let grantedSignatureKey = "yiyi.accessibility.grantedSignature"
+    static let repairAttemptedKey = "yiyi.accessibility.repairAttempted"
 
     static func currentSignature() -> String {
         guard let executableURL = Bundle.main.executableURL else { return "unavailable" }
@@ -36,10 +37,14 @@ struct AccessibilityStatus {
     static func observe(defaults: UserDefaults = .standard) -> (trusted: Bool, signature: String, advice: AccessibilityAdvice) {
         let trusted = SelectionCapture.isTrusted(prompt: false)
         let signature = currentSignature()
-        if trusted { defaults.set(signature, forKey: grantedSignatureKey) }
+        if trusted {
+            defaults.set(signature, forKey: grantedSignatureKey)
+            defaults.removeObject(forKey: repairAttemptedKey)
+        }
         let advice = accessibilityAdvice(
             trusted: trusted,
             hasPrompted: defaults.bool(forKey: hasPromptedKey),
+            repairAttempted: defaults.bool(forKey: repairAttemptedKey),
             grantedSignature: defaults.string(forKey: grantedSignatureKey),
             currentSignature: signature
         )
@@ -49,6 +54,30 @@ struct AccessibilityStatus {
     static func requestSystemPrompt(defaults: UserDefaults = .standard) {
         defaults.set(true, forKey: hasPromptedKey)
         _ = SelectionCapture.isTrusted(prompt: true)
+    }
+
+    static func resetAccessibility(completion: @escaping @MainActor @Sendable (Result<Void, Error>) -> Void) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "cc.blackblue.yiyi"]
+        process.terminationHandler = { process in
+            DispatchQueue.main.async {
+                if process.terminationStatus == 0 {
+                    completion(.success(()))
+                } else {
+                    completion(.failure(NSError(
+                        domain: "cc.blackblue.yiyi.accessibility",
+                        code: Int(process.terminationStatus),
+                        userInfo: [NSLocalizedDescriptionKey: "tccutil could not reset yiyi's Accessibility entry."]
+                    )))
+                }
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            completion(.failure(error))
+        }
     }
 
     static func shortSignature(_ signature: String) -> String {

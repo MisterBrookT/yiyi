@@ -13,7 +13,7 @@ final class SuperKeyMonitor {
         stop()
         self.superKey = superKey
         for (index, command) in commands.enumerated() {
-            if let binding = try? parseBinding(command.hotkey), case let .superKey(keyCode) = binding { bindings[keyCode] = index }
+            if let binding = try? effectiveBinding(command.hotkey, superKey: superKey), case let .superKey(keyCode) = binding { bindings[keyCode] = index }
         }
         guard superKey != .none else { status = "off"; return }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)

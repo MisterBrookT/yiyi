@@ -14,9 +14,9 @@ import YiyiCore
         try encoder.encode(seed).write(to: manager.fileURL)
     }
     try manager.load()
-    let status = AccessibilityStatus(trusted: false, superKeyTapStatus: "unavailable — Accessibility permission required", signatureIdentity: "yiyi Local Signing · cc.blackblue.yiyi", advice: .staleGrant)
+    let status = AccessibilityStatus(trusted: false, superKeyTapStatus: "unavailable — Accessibility permission required", signatureIdentity: "yiyi Local Signing · cc.blackblue.yiyi", advice: .repairStaleGrant)
     func makeController() -> SettingsWindowController {
-        SettingsWindowController(configs: manager, accessibilityStatus: { status }, requestAccessibility: {})
+        SettingsWindowController(configs: manager, accessibilityStatus: { status }, requestAccessibility: {}, repairAccessibility: {})
     }
     let controller = makeController()
     var checks: [[String: Any]] = []
@@ -37,6 +37,7 @@ import YiyiCore
         try check("pane.\(pane.rawValue.lowercased()).visible", controller.control(accessibilityID: "pane.\(pane.rawValue.lowercased())") != nil, "sidebar selection displays \(pane.rawValue)")
         try check("pane.\(pane.rawValue.lowercased()).selected", controller.selectedPane == pane, "selected pane model follows sidebar")
         try assertGeometry(controller: controller, pane: pane, checks: &checks)
+        try assertInteractivity(controller: controller, pane: pane, checks: &checks)
         lightTrees[pane] = controller.window?.contentView?.geometryTree() ?? [:]
         try controller.renderPNG(to: outdir.appendingPathComponent("light-\(pane.rawValue.lowercased()).png"))
     }
@@ -47,6 +48,14 @@ import YiyiCore
         try check("provider.key-status.wraps", keyStatus.bounds.height + 0.5 >= wrappedHeight, "key status height \(keyStatus.bounds.height) fits wrapped text height \(wrappedHeight)")
     } else {
         try check("provider.key-status.wraps", false, "key status exists")
+    }
+    controller.selectPane(.superkey, persist: false)
+    controller.prepareOffscreen(appearance: light)
+    if let tapStatus = controller.control(accessibilityID: "superkey.tap") as? NSTextField {
+        let wrappedHeight = tapStatus.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: tapStatus.bounds.width, height: .greatestFiniteMagnitude)).height ?? 0
+        try check("superkey.tap.wraps", tapStatus.bounds.height + 0.5 >= wrappedHeight, "tap availability height \(tapStatus.bounds.height) fits wrapped text height \(wrappedHeight)")
+    } else {
+        try check("superkey.tap.wraps", false, "tap availability exists")
     }
     controller.selectPane(.permissions, persist: false)
     controller.prepareOffscreen(appearance: light)
@@ -65,7 +74,7 @@ import YiyiCore
         try check("semantic.\(id)", actual == expected, "\(id) accessible value is \(expected), got \(actual ?? "nil")")
     }
     try check("permission.stale-grant", controller.control(accessibilityID: "permission.stale-grant") != nil, "stale-grant guidance renders")
-    try check("permission.enable", controller.control(accessibilityID: "permission.enable") != nil, "user-initiated permission control renders")
+    try check("permission.repair", controller.control(accessibilityID: "permission.repair") != nil, "repair permission control renders")
 
     controller.selectPane(.provider)
     let model = try field("provider.model"); model.stringValue = "deepseek-v4-flash-test"; act(model)
@@ -116,6 +125,46 @@ import YiyiCore
     let figures = try images.map { name -> String in let data = try Data(contentsOf: outdir.appendingPathComponent(name)).base64EncodedString(); return "<figure><img src=\"data:image/png;base64,\(data)\"><figcaption>\(name)</figcaption></figure>" }.joined()
     let html = "<!doctype html><meta charset=utf-8><title>yiyi Settings UI journey</title><style>body{font:15px system-ui;max-width:1200px;margin:32px auto;color:#222}h1{font-size:24px}section{margin:24px 0}figure{display:inline-block;width:48%;vertical-align:top;margin:1%}img{width:100%;border:1px solid #ccc}code{white-space:pre-wrap}</style><h1>yiyi Settings UI journey</h1><p>Off-screen rendering of the real AppKit view hierarchy; no host pixels or synthetic input.</p><section><h2>Verdict: PASS</h2><p>All panes, semantic interaction, persistence, validation, layout invariants, and light/dark geometry passed.</p></section><section>\(figures)</section><section><h2>Assertions</h2><code>\(String(data: json, encoding: .utf8)!)</code></section>"
     try html.write(to: outdir.appendingPathComponent("report.html"), atomically: true, encoding: .utf8)
+}
+
+@MainActor private func assertInteractivity(controller: SettingsWindowController, pane: SettingsWindowController.Pane, checks: inout [[String: Any]]) throws {
+    func record(_ name: String, _ passed: Bool, _ detail: String) throws {
+        checks.append(["name": name, "passed": passed, "detail": detail])
+        if !passed { throw NSError(domain: "UIJourney", code: 6, userInfo: [NSLocalizedDescriptionKey: "\(name): \(detail)"]) }
+    }
+    guard let window = controller.window,
+          let windowRoot = window.contentView,
+          let paneRoot = controller.control(accessibilityID: "pane.\(pane.rawValue.lowercased())") else { return }
+    try record("interaction.window.can-become-key", window.canBecomeKey, "settings window accepts key status")
+    try record("interaction.\(pane.rawValue.lowercased()).single-content", controller.installedPaneCount == 1, "detail contains exactly one pane view")
+    let controls = paneRoot.allSubviews.filter { view in
+        guard !view.isHidden else { return false }
+        if let text = view as? NSTextField { return text.isEditable }
+        if let text = view as? NSTextView { return text.isEditable }
+        return view is NSButton || view is NSPopUpButton
+    }
+    for control in controls {
+        let frame = windowRoot.convert(control.bounds, from: control)
+        let centre = NSPoint(x: frame.midX, y: frame.midY)
+        guard windowRoot.bounds.contains(centre), frame.width > 0, frame.height > 0 else { continue }
+        let hit = windowRoot.hitTest(centre)
+        let hitBelongsToControl = hit.map { candidate in
+            candidate === control || candidate.isDescendant(of: control) || control.isDescendant(of: candidate)
+        } ?? false
+        let wired: Bool
+        if let text = control as? NSTextField {
+            wired = text.isEditable || (text.target != nil && text.action != nil) || !text.isEnabled
+        } else if let text = control as? NSTextView {
+            wired = text.isEditable
+        } else if let value = control as? NSControl {
+            wired = value.target != nil && value.action != nil
+        } else {
+            wired = false
+        }
+        let id = control.accessibilityIdentifier().isEmpty ? String(describing: type(of: control)) : control.accessibilityIdentifier()
+        try record("interaction.\(pane.rawValue.lowercased()).\(id).hit-test", hitBelongsToControl, "\(id) is hit-testable at its centre")
+        try record("interaction.\(pane.rawValue.lowercased()).\(id).wired", wired, "\(id) is editable or has target/action")
+    }
 }
 
 @MainActor private func assertGeometry(controller: SettingsWindowController, pane: SettingsWindowController.Pane, checks: inout [[String: Any]]) throws {

@@ -25,6 +25,16 @@ Requires macOS 14+ and Swift 6.
 
 The installer builds a release app, signs it with a stable identity, installs it to `/Applications` (or `~/Applications` without write access), and launches it. It prefers `YIYI_CODESIGN_IDENTITY`, then an existing Developer ID Application identity, and otherwise creates and reuses a local `yiyi Local Signing` identity in the login keychain.
 
+## App icon
+
+The app icon is a quiet dark squircle built around `译`, with all standard macOS resolutions in `Resources/AppIcon.icns`. Regenerate it deterministically with:
+
+```sh
+./scripts/make-icon.sh
+```
+
+The release build copies the generated ICNS into the app bundle before signing.
+
 ## First use
 
 On first launch a small panel explains the hotkeys and offers to enable Accessibility:

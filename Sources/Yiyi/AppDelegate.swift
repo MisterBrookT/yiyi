@@ -7,14 +7,30 @@ import YiyiCore
     private lazy var settings = SettingsWindowController(
         configs: configs,
         accessibilityStatus: { [weak self] in self?.accessibilityStatus() ?? AccessibilityStatus(trusted: false, superKeyTapStatus: "unknown", signatureIdentity: "unavailable", advice: .awaitGrant) },
-        requestAccessibility: { [weak self] in self?.openAccessibilitySettings() }
+        requestAccessibility: { [weak self] in self?.openAccessibilitySettings() },
+        repairAccessibility: { [weak self] in self?.repairAccessibilityPermission() }
     )
     private var statusItem: NSStatusItem!
     private var lastResult: String?
     private var accessibilityPollTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem.button?.title = "译"
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let font = NSFont(name: "PingFangSC-Semibold", size: 15) ?? .systemFont(ofSize: 15, weight: .semibold)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        let glyph = "译" as NSString
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            let bounds = glyph.size(withAttributes: attributes)
+            glyph.draw(
+                at: NSPoint(x: (18 - bounds.width) / 2, y: (18 - bounds.height) / 2),
+                withAttributes: attributes
+            )
+            return true
+        }
+        image.isTemplate = true
+        statusItem.button?.image = image
+        statusItem.button?.title = ""
+        statusItem.button?.setAccessibilityLabel("yiyi")
         NotificationCenter.default.addObserver(forName: .yiyiHotkey, object: nil, queue: .main) { [weak self] note in
             let index = note.object as? Int ?? 0
             Task { @MainActor in self?.runCommand(index: index) }
@@ -49,7 +65,11 @@ import YiyiCore
         let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
         add("Relaunch yiyi", action: #selector(relaunch), to: menu)
         let login = add("Launch at login", action: #selector(toggleLogin(_:)), to: menu); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        if !SelectionCapture.isTrusted(prompt: false) {
+        let accessibility = AccessibilityState.observe()
+        if accessibility.advice == .repairStaleGrant {
+            let item = add("Repair Accessibility Permission…", action: #selector(repairAccessibilityPermission), to: menu)
+            item.toolTip = "The existing grant belongs to an older build and will be re-requested."
+        } else if !accessibility.trusted {
             let item = add("Enable Accessibility…", action: #selector(openAccessibilitySettings), to: menu)
             item.toolTip = accessibilityHint
         }
@@ -149,7 +169,7 @@ import YiyiCore
     }
 
     private var staleGrantMessage: String {
-        "Accessibility was granted to an earlier build of yiyi. Switch yiyi off and on again in System Settings → Privacy & Security → Accessibility."
+        "The existing Accessibility grant belongs to an older yiyi build. Repair it to reset only yiyi's entry and request permission again."
     }
 
     private func accessibilityStatus() -> AccessibilityStatus {
@@ -166,7 +186,7 @@ import YiyiCore
         switch advice {
         case .promptOnce:
             AccessibilityState.requestSystemPrompt()
-        case .staleGrant:
+        case .repairStaleGrant:
             showStaleGrantNotice()
         case .ok, .awaitGrant:
             break
@@ -176,12 +196,29 @@ import YiyiCore
     private func showStaleGrantNotice() {
         panel.showNotice(command: "Accessibility",
                          message: staleGrantMessage,
-                         hints: "⏎ enable accessibility   esc later") { [weak self] in self?.openAccessibilitySettings() }
+                         hints: "⏎ repair permission   esc later") { [weak self] in self?.repairAccessibilityPermission() }
     }
 
     @objc private func openAccessibilitySettings() {
         AccessibilityState.requestSystemPrompt()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+    }
+
+    @objc private func repairAccessibilityPermission() {
+        AccessibilityState.resetAccessibility { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                UserDefaults.standard.set(true, forKey: AccessibilityState.hasPromptedKey)
+                UserDefaults.standard.set(true, forKey: AccessibilityState.repairAttemptedKey)
+                UserDefaults.standard.removeObject(forKey: AccessibilityState.grantedSignatureKey)
+                AccessibilityState.requestSystemPrompt()
+                startAccessibilityPollingIfNeeded(trusted: false)
+                rebuildMenu()
+            case let .failure(error):
+                panel.showError(message: "Could not repair Accessibility permission", detail: error.localizedDescription)
+            }
+        }
     }
 
     private func startAccessibilityPollingIfNeeded(trusted: Bool) {
@@ -206,6 +243,7 @@ import YiyiCore
         accessibilityPollTimer?.invalidate()
         accessibilityPollTimer = nil
         rebuildMenu()
+        relaunch()
     }
 
     @objc private func relaunch() {
