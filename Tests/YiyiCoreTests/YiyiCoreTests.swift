@@ -11,6 +11,56 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: "current", currentSignature: "current"), .awaitGrant)
         XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: nil, currentSignature: "current"), .awaitGrant)
     }
+
+    func testSelectionCaptureUsesAdvancedNonEmptySelection() {
+        XCTAssertEqual(
+            chooseCaptureInput(trusted: true, changeCountAdvanced: true, capturedText: "selected", clipboardText: "old"),
+            CaptureDecision(text: "selected", source: .selection)
+        )
+    }
+
+    func testSelectionCaptureFallsBackWhenCapturedTextIsWhitespace() {
+        XCTAssertEqual(
+            chooseCaptureInput(trusted: true, changeCountAdvanced: true, capturedText: " \n ", clipboardText: "clipboard"),
+            CaptureDecision(text: "clipboard", source: .clipboard)
+        )
+    }
+
+    func testSelectionCaptureFallsBackWhenChangeCountDoesNotAdvance() {
+        XCTAssertEqual(
+            chooseCaptureInput(trusted: true, changeCountAdvanced: false, capturedText: "ignored", clipboardText: "clipboard"),
+            CaptureDecision(text: "clipboard", source: .clipboard)
+        )
+    }
+
+    func testRegressionUntrustedProcessLabelsClipboardAndExplainsRelaunch() {
+        let decision = chooseCaptureInput(
+            trusted: false,
+            changeCountAdvanced: false,
+            capturedText: nil,
+            clipboardText: "stale clipboard"
+        )
+        XCTAssertEqual(decision.source, .clipboard)
+        XCTAssertEqual(decision.text, "stale clipboard")
+        XCTAssertNotNil(decision.hint)
+        XCTAssertTrue(decision.hint?.contains("relaunch") == true)
+    }
+
+    func testUntrustedProcessWithEmptyClipboardIsEmpty() {
+        let decision = chooseCaptureInput(
+            trusted: false,
+            changeCountAdvanced: false,
+            capturedText: nil,
+            clipboardText: "  "
+        )
+        XCTAssertEqual(decision.source, .empty)
+        XCTAssertNil(decision.text)
+    }
+
+    func testTrustIsReevaluatedForEverySynthesisDecision() {
+        XCTAssertFalse(shouldSynthesizeSelection(trusted: false))
+        XCTAssertTrue(shouldSynthesizeSelection(trusted: true))
+    }
     func testPromptTemplateAliases() throws {
         XCTAssertEqual(try renderPrompt("A {selection} B {input}", input: "hello"), "A hello B hello")
         XCTAssertThrowsError(try renderPrompt("No variable", input: "hello")) {

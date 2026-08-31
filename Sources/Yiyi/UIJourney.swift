@@ -14,89 +14,140 @@ import YiyiCore
         try encoder.encode(seed).write(to: manager.fileURL)
     }
     try manager.load()
-    let controller = SettingsWindowController(
-        configs: manager,
-        accessibilityStatus: {
-            AccessibilityStatus(
-                trusted: false,
-                superKeyTapStatus: "unavailable: Accessibility not granted",
-                signatureIdentity: "identity:cc.blackblue.yiyi:0123456789ab",
-                advice: .staleGrant
-            )
-        },
-        requestAccessibility: {}
-    )
+    let status = AccessibilityStatus(trusted: false, superKeyTapStatus: "unavailable — Accessibility permission required", signatureIdentity: "yiyi Local Signing · cc.blackblue.yiyi", advice: .staleGrant)
+    func makeController() -> SettingsWindowController {
+        SettingsWindowController(configs: manager, accessibilityStatus: { status }, requestAccessibility: {})
+    }
+    let controller = makeController()
     var checks: [[String: Any]] = []
     func check(_ name: String, _ condition: @autoclosure () -> Bool, _ detail: String) throws {
-        let passed = condition(); checks.append(["name": name, "passed": passed, "detail": detail]); if !passed { throw NSError(domain: "UIJourney", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(name): \(detail)"]) }
+        let passed = condition(); checks.append(["name": name, "passed": passed, "detail": detail])
+        if !passed { throw NSError(domain: "UIJourney", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(name): \(detail)"]) }
     }
     func act(_ view: NSControl) { if let action = view.action { _ = NSApp.sendAction(action, to: view.target, from: view) } }
     func field(_ id: String) throws -> NSTextField { guard let value = controller.control(accessibilityID: id) as? NSTextField else { throw NSError(domain: "UIJourney", code: 2, userInfo: [NSLocalizedDescriptionKey: "missing text field \(id)"]) }; return value }
     func popup(_ id: String) throws -> NSPopUpButton { guard let value = controller.control(accessibilityID: id) as? NSPopUpButton else { throw NSError(domain: "UIJourney", code: 3, userInfo: [NSLocalizedDescriptionKey: "missing popup \(id)"]) }; return value }
 
     let light = NSAppearance(named: .aqua)!, dark = NSAppearance(named: .darkAqua)!
+    var lightTrees: [SettingsWindowController.Pane: [String: String]] = [:]
+    let panes = SettingsWindowController.Pane.allCases
+    for pane in panes {
+        controller.selectPane(pane, persist: true)
+        controller.prepareOffscreen(appearance: light)
+        try check("pane.\(pane.rawValue.lowercased()).visible", controller.control(accessibilityID: "pane.\(pane.rawValue.lowercased())") != nil, "sidebar selection displays \(pane.rawValue)")
+        try check("pane.\(pane.rawValue.lowercased()).selected", controller.selectedPane == pane, "selected pane model follows sidebar")
+        try assertGeometry(controller: controller, pane: pane, checks: &checks)
+        lightTrees[pane] = controller.window?.contentView?.geometryTree() ?? [:]
+        try controller.renderPNG(to: outdir.appendingPathComponent("light-\(pane.rawValue.lowercased()).png"))
+    }
+    controller.selectPane(.provider, persist: false)
     controller.prepareOffscreen(appearance: light)
-    for section in ["provider", "shortcuts", "superkey"] { try check("section.\(section)", controller.control(accessibilityID: "section.\(section)") != nil, "section must exist in scroll content") }
+    if let keyStatus = controller.control(accessibilityID: "provider.key-status") as? NSTextField {
+        let wrappedHeight = keyStatus.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: keyStatus.bounds.width, height: .greatestFiniteMagnitude)).height ?? 0
+        try check("provider.key-status.wraps", keyStatus.bounds.height + 0.5 >= wrappedHeight, "key status height \(keyStatus.bounds.height) fits wrapped text height \(wrappedHeight)")
+    } else {
+        try check("provider.key-status.wraps", false, "key status exists")
+    }
+    controller.selectPane(.permissions, persist: false)
+    controller.prepareOffscreen(appearance: light)
+    let lightSidebar = controller.sidebarState()
+    try check("sidebar.light.rows", lightSidebar.titles == panes.map(\.rawValue), "sidebar renders all pane titles: \(lightSidebar.titles)")
+    try check("sidebar.light.selection", lightSidebar.selectedRow == 3, "Permissions row is selected")
+    try controller.renderSidebarPNG(to: outdir.appendingPathComponent("sidebar-light.png"), dark: false)
+
+    controller.selectPane(.permissions)
     let permissionValues = [
-        "accessibility.trusted": "No",
-        "accessibility.superkey-tap": "unavailable: Accessibility not granted",
-        "accessibility.signature": "identity:cc.blackblue.yiyi:0123456789ab"
+        ("permission.trusted", "No"),
+        ("permission.signature", status.signatureIdentity)
     ]
     for (id, expected) in permissionValues {
         let actual = controller.control(accessibilityID: id)?.accessibilityValue() as? String
-        try check("permission.\(id)", actual == expected, "\(id) accessible value is \(expected), got \(actual ?? "nil")")
+        try check("semantic.\(id)", actual == expected, "\(id) accessible value is \(expected), got \(actual ?? "nil")")
     }
-    try check("permission.stale-grant", controller.control(accessibilityID: "accessibility.stale-grant") != nil, "stale grant guidance renders")
-    try check("permission.enable", controller.control(accessibilityID: "accessibility.enable") != nil, "user-initiated permission control renders")
-    try controller.renderPNG(to: outdir.appendingPathComponent("light-top.png"))
-    try controller.renderPNG(to: outdir.appendingPathComponent("light-bottom.png"), bottom: true)
+    try check("permission.stale-grant", controller.control(accessibilityID: "permission.stale-grant") != nil, "stale-grant guidance renders")
+    try check("permission.enable", controller.control(accessibilityID: "permission.enable") != nil, "user-initiated permission control renders")
 
+    controller.selectPane(.provider)
     let model = try field("provider.model"); model.stringValue = "deepseek-v4-flash-test"; act(model)
     let reasoning = try popup("provider.reasoning"); reasoning.selectItem(withTitle: "high"); act(reasoning)
+    controller.selectPane(.superkey)
     let superkey = try popup("superkey.popup"); superkey.selectItem(withTitle: "right ⌘"); act(superkey)
     try controller.setRecordedHotkey("super+t", index: 0)
     let persisted = try JSONDecoder().decode(YiyiConfig.self, from: Data(contentsOf: manager.fileURL))
-    try check("persistence.model", persisted.providers["deepseek"]?.model == "deepseek-v4-flash-test", "model persists")
+    try check("persistence.model", persisted.providers["deepseek"]?.model == "deepseek-v4-flash-test", "model round-trips through config.json")
     try check("persistence.reasoning", persisted.providers["deepseek"]?.reasoningEffort == .high, "reasoning persists")
     try check("persistence.superkey", persisted.superKey == .rightCommand, "superkey persists")
     try check("persistence.hotkey", persisted.commands.first?.hotkey == "super+t", "super hotkey persists")
-    try check("legacy.providers", persisted.providers["openrouter"] != nil && persisted.providers["ark"] != nil, "unknown loaded providers survive")
+    try check("legacy.providers", persisted.providers["openrouter"] != nil && persisted.providers["ark"] != nil, "unknown and legacy providers survive a UI edit")
 
+    controller.selectPane(.shortcuts)
     guard let prompt = controller.control(accessibilityID: "command.0.prompt") as? NSTextView else { throw NSError(domain: "UIJourney", code: 4) }
     prompt.string = "invalid prompt"; controller.textDidEndEditing(Notification(name: NSText.didEndEditingNotification, object: prompt))
-    try check("prompt.inline-error", controller.control(accessibilityID: "command.0.prompt-error") != nil, "invalid prompt shows inline danger text")
-    try controller.renderPNG(to: outdir.appendingPathComponent("light-invalid-prompt.png"))
+    try check("prompt.inline-error", controller.control(accessibilityID: "command.0.prompt-error") != nil, "invalid prompt shows inline validation")
+    try controller.renderPNG(to: outdir.appendingPathComponent("light-shortcuts-invalid.png"))
+
+    controller.selectPane(.permissions, persist: true)
+    let restored = makeController()
+    try check("pane.persistence-roundtrip", restored.selectedPane == .permissions, "last selected pane restores in a new window controller")
+    restored.selectPane(.provider, persist: true)
 
     try manager.setProvider("deepseek", model: "deepseek-v4-flash", reasoningEffort: ReasoningEffort.none)
     try manager.setSuperKey(.none); try manager.setCommand(0, prompt: YiyiConfig.defaultCommands[0].prompt, hotkey: "cmd+-")
-    controller.prepareOffscreen(appearance: dark)
-    try controller.renderPNG(to: outdir.appendingPathComponent("dark-top.png"))
-    try controller.renderPNG(to: outdir.appendingPathComponent("dark-bottom.png"), bottom: true)
-
-    let geometry = controller.window?.contentView?.geometryTree() ?? [:]
-    controller.prepareOffscreen(appearance: light)
-    let lightGeometry = controller.window?.contentView?.geometryTree() ?? [:]
-    try check("geometry.light-dark", NSDictionary(dictionary: geometry).isEqual(to: lightGeometry), "frame trees are identical")
-    if let root = controller.window?.contentView {
-        let grids = root.allSubviews.compactMap { $0 as? NSGridView }
-        let origins = grids.compactMap { grid -> CGFloat? in guard grid.numberOfRows > 0 else { return nil }; return grid.cell(atColumnIndex: 1, rowIndex: 0).contentView.map { root.convert($0.bounds, from: $0).minX } }
-        try check("geometry.control-column", origins.allSatisfy { abs($0 - (origins.first ?? $0)) <= 0.5 }, "all value columns share one x origin: \(origins)")
-        let headingX = ["provider", "shortcuts", "superkey"].compactMap { controller.control(accessibilityID: "section.\($0)").map { root.convert($0.bounds, from: $0).minX } }
-        let labelX = grids.first.flatMap { $0.cell(atColumnIndex: 0, rowIndex: 0).contentView }.map { root.convert($0.bounds, from: $0).minX } ?? 0
-        try check("geometry.headings", headingX.allSatisfy { abs($0 - labelX) <= 0.5 }, "section headings align with label column")
-        let controls = grids.compactMap { $0.cell(atColumnIndex: 1, rowIndex: 0).contentView?.allSubviews.compactMap { $0 as? NSControl }.first }
-        try check("geometry.no-truncation", controls.allSatisfy { $0.bounds.width + 0.5 >= min(260, max(0, $0.intrinsicContentSize.width)) }, "controls fit intrinsic content")
+    for pane in panes {
+        controller.selectPane(pane, persist: false)
+        controller.prepareOffscreen(appearance: light)
+        let paneID = "pane.\(pane.rawValue.lowercased())"
+        let comparisonLightTree = controller.control(accessibilityID: paneID)?.geometryTree() ?? [:]
+        controller.prepareOffscreen(appearance: dark)
+        let darkTree = controller.control(accessibilityID: paneID)?.geometryTree() ?? [:]
+        try check("geometry.\(pane.rawValue.lowercased()).light-dark", NSDictionary(dictionary: darkTree).isEqual(to: comparisonLightTree), "light and dark frame trees are identical")
+        try controller.renderPNG(to: outdir.appendingPathComponent("dark-\(pane.rawValue.lowercased()).png"))
     }
+    controller.selectPane(.permissions, persist: false)
+    controller.prepareOffscreen(appearance: dark)
+    let darkSidebar = controller.sidebarState()
+    try check("sidebar.dark.rows", darkSidebar.titles == panes.map(\.rawValue), "dark sidebar renders all pane titles: \(darkSidebar.titles)")
+    try check("sidebar.dark.selection", darkSidebar.selectedRow == 3, "Permissions row remains selected in dark appearance")
+    try controller.renderSidebarPNG(to: outdir.appendingPathComponent("sidebar-dark.png"), dark: true)
 
-    let json = try JSONSerialization.data(withJSONObject: ["passed": checks.allSatisfy { $0["passed"] as? Bool == true }, "checks": checks], options: [.prettyPrinted, .sortedKeys]); try json.write(to: outdir.appendingPathComponent("assertions.json"))
-    let images = ["light-top.png", "light-bottom.png", "light-invalid-prompt.png", "dark-top.png", "dark-bottom.png"]
+    let json = try JSONSerialization.data(withJSONObject: ["passed": checks.allSatisfy { $0["passed"] as? Bool == true }, "checks": checks], options: [.prettyPrinted, .sortedKeys])
+    try json.write(to: outdir.appendingPathComponent("assertions.json"))
+    let images = panes.flatMap { ["light-\($0.rawValue.lowercased()).png", "dark-\($0.rawValue.lowercased()).png"] } + ["sidebar-light.png", "sidebar-dark.png", "light-shortcuts-invalid.png"]
     let figures = try images.map { name -> String in let data = try Data(contentsOf: outdir.appendingPathComponent(name)).base64EncodedString(); return "<figure><img src=\"data:image/png;base64,\(data)\"><figcaption>\(name)</figcaption></figure>" }.joined()
-    let html = "<!doctype html><meta charset=utf-8><title>yiyi Settings UI journey</title><style>body{font:15px system-ui;max-width:1200px;margin:32px auto;color:#222}h1{font-size:24px}section{margin:24px 0}figure{display:inline-block;width:48%;vertical-align:top;margin:1%}img{width:100%;border:1px solid #ccc}code{white-space:pre-wrap}</style><h1>yiyi Settings UI journey</h1><p>Off-screen rendering of the real AppKit view hierarchy; no host pixels or synthetic input.</p><section><h2>Verdict: PASS</h2><p>Semantic interaction, persistence, prompt validation, layout invariants, and light/dark geometry passed.</p></section><section>\(figures)</section><section><h2>Assertions</h2><code>\(String(data: json, encoding: .utf8)!)</code></section><p>Not covered: host-level ⌘- and super+t; use a disposable VM or brook's manual press.</p>"
+    let html = "<!doctype html><meta charset=utf-8><title>yiyi Settings UI journey</title><style>body{font:15px system-ui;max-width:1200px;margin:32px auto;color:#222}h1{font-size:24px}section{margin:24px 0}figure{display:inline-block;width:48%;vertical-align:top;margin:1%}img{width:100%;border:1px solid #ccc}code{white-space:pre-wrap}</style><h1>yiyi Settings UI journey</h1><p>Off-screen rendering of the real AppKit view hierarchy; no host pixels or synthetic input.</p><section><h2>Verdict: PASS</h2><p>All panes, semantic interaction, persistence, validation, layout invariants, and light/dark geometry passed.</p></section><section>\(figures)</section><section><h2>Assertions</h2><code>\(String(data: json, encoding: .utf8)!)</code></section>"
     try html.write(to: outdir.appendingPathComponent("report.html"), atomically: true, encoding: .utf8)
+}
+
+@MainActor private func assertGeometry(controller: SettingsWindowController, pane: SettingsWindowController.Pane, checks: inout [[String: Any]]) throws {
+    guard let root = controller.control(accessibilityID: "pane.\(pane.rawValue.lowercased())") else { return }
+    func record(_ name: String, _ passed: Bool, _ detail: String) throws {
+        checks.append(["name": name, "passed": passed, "detail": detail])
+        if !passed { throw NSError(domain: "UIJourney", code: 5, userInfo: [NSLocalizedDescriptionKey: "\(name): \(detail)"]) }
+    }
+    let grids = root.allSubviews.compactMap { $0 as? NSGridView }.filter { $0.numberOfColumns >= 2 && $0.numberOfRows > 0 }
+    let origins = grids.compactMap { $0.cell(atColumnIndex: 1, rowIndex: 0).contentView }.map { root.convert($0.bounds, from: $0).minX }
+    try record("geometry.\(pane.rawValue.lowercased()).control-column", !origins.isEmpty && origins.allSatisfy { abs($0 - (origins.first ?? $0)) <= 2.0 }, "value columns share one grid origin (allowing AppKit's 2 pt text-field drawing inset): \(origins)")
+    let labelX = grids.first.flatMap { $0.cell(atColumnIndex: 0, rowIndex: 0).contentView }.map { root.convert($0.bounds, from: $0).minX } ?? 0
+    let headings = root.allSubviews.compactMap { view -> NSView? in guard view.accessibilityIdentifier().hasPrefix("section.") else { return nil }; return view }
+    let headingOrigins = headings.map { root.convert($0.bounds, from: $0).minX }
+    try record("geometry.\(pane.rawValue.lowercased()).headings", !headings.isEmpty && headingOrigins.allSatisfy { abs($0 - labelX) <= 0.5 }, "headings align with label column: \(headingOrigins), label \(labelX)")
+    let controls = grids.flatMap { grid in
+        (0..<grid.numberOfRows)
+            .compactMap { grid.cell(atColumnIndex: 1, rowIndex: $0).contentView }
+            .flatMap { [$0] + $0.allSubviews }
+            .compactMap { $0 as? NSControl }
+    }
+    let truncated = controls.filter {
+        if let text = $0 as? NSTextField, text.maximumNumberOfLines != 1 { return false }
+        return $0.intrinsicContentSize.width > 0 && $0.bounds.width + 0.5 < $0.intrinsicContentSize.width
+    }
+    let truncationDetail = truncated.map { control in
+        "\(type(of: control)):\(NSStringFromSize(control.bounds.size))<\(NSStringFromSize(control.intrinsicContentSize))"
+    }
+    try record("geometry.\(pane.rawValue.lowercased()).no-truncation", truncated.isEmpty, "controls narrower than intrinsic width: \(truncationDetail)")
 }
 
 private extension NSView {
     var allSubviews: [NSView] { subviews + subviews.flatMap(\.allSubviews) }
-    func findText(_ needle: String) -> Bool { (self as? NSTextField)?.stringValue.contains(needle) == true || subviews.contains { $0.findText(needle) } }
-    func geometryTree() -> [String: String] { Dictionary(uniqueKeysWithValues: allSubviews.enumerated().map { ("\($0.offset):\(type(of: $0.element))", NSStringFromRect($0.element.frame)) }) }
+    func geometryTree() -> [String: String] { Dictionary(uniqueKeysWithValues: ([self] + allSubviews).enumerated().map { ("\($0.offset):\(type(of: $0.element))", NSStringFromRect($0.element.frame)) }) }
 }

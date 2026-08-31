@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import YiyiCore
 
 @MainActor enum SelectionCapture {
     static func isTrusted(prompt: Bool) -> Bool {
@@ -7,31 +8,60 @@ import ApplicationServices
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    /// Reads the frontmost selection by synthesizing Cmd+C. Without Accessibility the
-    /// synthetic key event is silently dropped by the window server, so `synthesize: false`
-    /// skips it entirely and yiyi runs in clipboard-only mode.
-    static func capture(synthesize: Bool = true) async -> String? {
+    static func capture(trusted: Bool) async -> CaptureDecision {
         let pasteboard = NSPasteboard.general
         let fallback = pasteboard.string(forType: .string)
+        guard shouldSynthesizeSelection(trusted: trusted) else {
+            return chooseCaptureInput(
+                trusted: false,
+                changeCountAdvanced: false,
+                capturedText: nil,
+                clipboardText: fallback
+            )
+        }
+
         let saved = pasteboard.pasteboardItems?.map { item in
-            item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { values, type in values[type] = item.data(forType: type) }
+            item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { values, type in
+                values[type] = item.data(forType: type)
+            }
         } ?? []
-        guard synthesize else { return fallback }
         let oldCount = pasteboard.changeCount
-        let source = CGEventSource(stateID: .hidSystemState)
-        let down = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: false)
-        down?.flags = .maskCommand; up?.flags = .maskCommand
-        down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
-        let deadline = Date().addingTimeInterval(0.4)
-        while pasteboard.changeCount == oldCount, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
-        let selected = pasteboard.changeCount != oldCount ? pasteboard.string(forType: .string) : nil
+
+        // The global hotkey fires while its physical chord may still be down. Posting another
+        // command chord during that overlap is unreliable in some target applications.
+        let modifierDeadline = Date().addingTimeInterval(0.3)
+        let triggerModifiers: NSEvent.ModifierFlags = [.command, .shift, .control, .option]
+        while !NSEvent.modifierFlags.intersection(triggerModifiers).isEmpty, Date() < modifierDeadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        let eventSource = CGEventSource(stateID: .hidSystemState)
+        let down = CGEvent(keyboardEventSource: eventSource, virtualKey: 8, keyDown: true)
+        let up = CGEvent(keyboardEventSource: eventSource, virtualKey: 8, keyDown: false)
+        down?.flags = .maskCommand
+        up?.flags = .maskCommand
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+
+        let captureDeadline = Date().addingTimeInterval(1.0)
+        while pasteboard.changeCount == oldCount, Date() < captureDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let advanced = pasteboard.changeCount != oldCount
+        let captured = advanced ? pasteboard.string(forType: .string) : nil
+
         pasteboard.clearContents()
         for values in saved {
             let item = NSPasteboardItem()
             for (type, data) in values { item.setData(data, forType: type) }
             pasteboard.writeObjects([item])
         }
-        return selected?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? selected : fallback
+
+        return chooseCaptureInput(
+            trusted: true,
+            changeCountAdvanced: advanced,
+            capturedText: captured,
+            clipboardText: fallback
+        )
     }
 }

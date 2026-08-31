@@ -50,9 +50,11 @@ synthetic `System Events` keystrokes do not reach them.
 
 ## Settings and configuration
 
-Choose **Settings…** from the menu (or press <kbd>⌘</kbd><kbd>,</kbd>) to configure yiyi without editing JSON. Changes are saved immediately. The window lets you choose DeepSeek or Qwen as the default, set each provider's model, API key, optional temperature, and reasoning effort, and shows where its key resolves from without revealing it.
+Choose **Settings…** from the menu (or press <kbd>⌘</kbd><kbd>,</kbd>) to open a native, four-pane settings window. Its source-list sidebar separates **Provider**, **Shortcuts**, **Superkey**, and **Permissions**, remembers the last pane, and sizes the window to the selected pane. Changes are saved immediately.
 
-Each shortcut has an editable name, provider/model and reasoning-effort overrides, prompt template, and a click-to-record hotkey. Press Escape while recording to cancel or Delete to clear it. Prompts must contain `{selection}` or `{input}`; invalid templates are marked inline. Commands can be added and removed.
+**Provider** selects the default service and edits its model, API key, optional temperature, reasoning effort, key-resolution status, and automatic copying. **Shortcuts** provides each command's hotkey recorder, provider/model/reasoning overrides, validated prompt template, and add/remove controls. **Superkey** contains the leader modifier, command bindings, and tap availability. **Permissions** reports Accessibility trust and the signing identity, explains stale grants, and offers the user-initiated enable action.
+
+The off-screen UI journey produces light- and dark-appearance screenshots of every pane alongside its semantic and geometry assertions. It renders the real AppKit view tree without activating the app or capturing the desktop.
 
 On first launch yiyi creates `~/.config/yiyi/config.json` with these exact defaults:
 

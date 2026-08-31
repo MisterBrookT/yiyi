@@ -11,6 +11,7 @@ import YiyiCore
     )
     private var statusItem: NSStatusItem!
     private var lastResult: String?
+    private var accessibilityPollTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem.button?.title = "译"
@@ -20,7 +21,9 @@ import YiyiCore
         }
         configs.onChange = { [weak self] in self?.configDidChange() }
         reloadConfig(showErrors: true)
-        handleAccessibilityAdvice(AccessibilityState.observe().advice)
+        let initialAccessibility = AccessibilityState.observe()
+        handleAccessibilityAdvice(initialAccessibility.advice)
+        startAccessibilityPollingIfNeeded(trusted: initialAccessibility.trusted)
     }
 
 
@@ -44,6 +47,7 @@ import YiyiCore
         add("Edit config…", action: #selector(editConfig), to: menu)
         add("Reload config", action: #selector(reload), to: menu)
         let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
+        add("Relaunch yiyi", action: #selector(relaunch), to: menu)
         let login = add("Launch at login", action: #selector(toggleLogin(_:)), to: menu); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         if !SelectionCapture.isTrusted(prompt: false) {
             let item = add("Enable Accessibility…", action: #selector(openAccessibilitySettings), to: menu)
@@ -89,21 +93,34 @@ import YiyiCore
     private func runCommand(index: Int) {
         guard configs.config.commands.indices.contains(index) else { return }
         let command = configs.config.commands[index]
+        // AX trust can change after launch. This observation deliberately happens for every
+        // invocation; no launch-time value is used to decide whether synthetic copy is allowed.
         let accessibility = AccessibilityState.observe()
-        let trusted = accessibility.trusted
-        if accessibility.advice == .staleGrant { showStaleGrantNotice() }
+        startAccessibilityPollingIfNeeded(trusted: accessibility.trusted)
         Task {
-            guard let input = await SelectionCapture.capture(synthesize: trusted), !input.isEmpty else {
-                panel.showError(command: command.name,
-                                message: trusted ? "No selected or clipboard text found"
-                                                 : "Nothing on the clipboard — copy the text first, or enable Accessibility",
-                                detail: trusted ? nil : accessibilityHint)
+            let capture = await SelectionCapture.capture(trusted: accessibility.trusted)
+            guard let input = capture.text else {
+                if accessibility.trusted {
+                    panel.showError(command: command.name, message: "No selected or clipboard text found")
+                } else {
+                    panel.showNotice(
+                        command: command.name,
+                        message: "Nothing on the clipboard. Accessibility is not active in this yiyi process.",
+                        hints: "⏎ relaunch yiyi   esc close"
+                    ) { [weak self] in self?.relaunch() }
+                }
                 return
             }
             do {
                 let provider = try resolveProvider(config: configs.config, command: command)
                 let key = try configs.apiKey(for: provider.name)
-                panel.showLoading(command: command.name, source: input, provider: provider.name, model: provider.model)
+                panel.showLoading(
+                    command: command.name,
+                    capture: capture,
+                    provider: provider.name,
+                    model: provider.model,
+                    relaunch: accessibility.trusted ? nil : { [weak self] in self?.relaunch() }
+                )
                 let prompt = try renderPrompt(command.prompt, input: input)
                 let result = try await OpenAIClient().complete(prompt: prompt, provider: provider, apiKey: key)
                 lastResult = result
@@ -165,5 +182,45 @@ import YiyiCore
     @objc private func openAccessibilitySettings() {
         AccessibilityState.requestSystemPrompt()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+    }
+
+    private func startAccessibilityPollingIfNeeded(trusted: Bool) {
+        if trusted {
+            accessibilityPollTimer?.invalidate()
+            accessibilityPollTimer = nil
+            return
+        }
+        guard accessibilityPollTimer == nil else { return }
+        accessibilityPollTimer = Timer.scheduledTimer(
+            timeInterval: 2,
+            target: self,
+            selector: #selector(pollAccessibility),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func pollAccessibility() {
+        let state = AccessibilityState.observe()
+        guard state.trusted else { return }
+        accessibilityPollTimer?.invalidate()
+        accessibilityPollTimer = nil
+        rebuildMenu()
+    }
+
+    @objc private func relaunch() {
+        let applicationURL = URL(fileURLWithPath: "/Applications/yiyi.app", isDirectory: true)
+        NSWorkspace.shared.openApplication(
+            at: applicationURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        ) { _, error in
+            guard error == nil else {
+                Task { @MainActor in
+                    self.panel.showError(message: "Could not relaunch yiyi", detail: error?.localizedDescription)
+                }
+                return
+            }
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
     }
 }

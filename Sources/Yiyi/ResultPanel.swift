@@ -1,4 +1,5 @@
 import AppKit
+import YiyiCore
 
 @MainActor enum Theme {
     static let paper = adaptive(light: 0xF7F6F2, dark: 0x171816)
@@ -94,7 +95,18 @@ private final class ThemeFillView: NSView {
     }
 
     func showLoading(command: String, source: String, provider: String, model: String) {
-        configure(command: command, source: source, provider: provider, model: model)
+        showLoading(
+            command: command,
+            capture: CaptureDecision(text: source, source: .selection),
+            provider: provider,
+            model: model
+        )
+    }
+
+    func showLoading(command: String, capture: CaptureDecision, provider: String, model: String, relaunch: (() -> Void)? = nil) {
+        configure(command: command, capture: capture, provider: provider, model: model)
+        confirm = relaunch
+        hintsLabel.stringValue = relaunch == nil ? "esc close   ⌘c copy" : "⏎ relaunch yiyi   esc close"
         statusLabel.stringValue = "working"; statusLabel.textColor = Theme.active; textView.string = ""; resizeAndShow()
     }
 
@@ -103,7 +115,7 @@ private final class ThemeFillView: NSView {
     }
 
     func showError(command: String = "yiyi", provider: String = "", model: String = "", message: String, detail: String? = nil) {
-        configure(command: command, source: "", provider: provider, model: model)
+        configure(command: command, capture: nil, provider: provider, model: model)
         statusLabel.stringValue = "failed"; statusLabel.textColor = Theme.danger
         let value = detail.map { "\(message)\n\n\($0)" } ?? message
         setBody(value, color: Theme.danger, font: .systemFont(ofSize: 15)); resizeAndShow()
@@ -111,14 +123,32 @@ private final class ThemeFillView: NSView {
 
     /// Quiet, non-blocking stand-in for a modal dialog: same panel, Return runs `confirm`.
     func showNotice(command: String, message: String, hints: String, confirm: (() -> Void)?) {
-        configure(command: command, source: "", provider: "", model: "")
+        configure(command: command, capture: nil, provider: "", model: "")
         statusLabel.stringValue = ""; self.confirm = confirm; hintsLabel.stringValue = hints
         setBody(message, color: Theme.ink, font: .systemFont(ofSize: 15)); resizeAndShow()
     }
 
-    private func configure(command: String, source: String, provider: String, model: String) {
-        commandLabel.stringValue = command.uppercased(); sourceLabel.stringValue = source.replacingOccurrences(of: "\n", with: " ")
-        sourceLabel.isHidden = source.isEmpty; providerLabel.stringValue = [provider, model].filter { !$0.isEmpty }.joined(separator: "/")
+    private func configure(command: String, capture: CaptureDecision?, provider: String, model: String) {
+        commandLabel.stringValue = command.uppercased()
+        if let capture {
+            let source = capture.source.rawValue
+            let text = capture.text?.replacingOccurrences(of: "\n", with: " ") ?? ""
+            let suffix = capture.hint.map { " · \($0)" } ?? ""
+            let value = NSMutableAttributedString(
+                string: source,
+                attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium), .foregroundColor: Theme.muted]
+            )
+            value.append(NSAttributedString(
+                string: "  \(text)\(suffix)",
+                attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Theme.muted]
+            ))
+            sourceLabel.attributedStringValue = value
+            sourceLabel.isHidden = false
+        } else {
+            sourceLabel.stringValue = ""
+            sourceLabel.isHidden = true
+        }
+        providerLabel.stringValue = [provider, model].filter { !$0.isEmpty }.joined(separator: "/")
     }
     private func setBody(_ text: String, color: NSColor, font: NSFont) {
         let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 7.5
