@@ -6,6 +6,7 @@ import YiyiCore
     private let configs = ConfigManager(), hotkeys = HotkeyManager(), panel = ResultPanelController()
     private var statusItem: NSStatusItem!
     private var lastResult: String?
+    private var didRequestAccessibility = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem.button?.title = "译"
@@ -14,6 +15,16 @@ import YiyiCore
             Task { @MainActor in self?.runCommand(index: index) }
         }
         reloadConfig(showErrors: true)
+        if !SelectionCapture.isTrusted(prompt: false), !UserDefaults.standard.bool(forKey: "yiyi.onboarded") {
+            UserDefaults.standard.set(true, forKey: "yiyi.onboarded")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
+        }
+    }
+
+    private func showOnboarding() {
+        panel.showNotice(command: "yiyi",
+                         message: "⌘- translates the selected text, ⌘⇧- translates it into English.\n\nTo read the selection in other apps, yiyi needs Accessibility access. Without it, it translates whatever is on the clipboard.",
+                         hints: "⏎ enable accessibility   esc later") { [weak self] in self?.openAccessibilitySettings() }
     }
 
     private func rebuildMenu() {
@@ -36,6 +47,10 @@ import YiyiCore
         add("Reload config", action: #selector(reload), to: menu)
         let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
         let login = add("Launch at login", action: #selector(toggleLogin(_:)), to: menu); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        if !SelectionCapture.isTrusted(prompt: false) {
+            let item = add("Enable Accessibility…", action: #selector(openAccessibilitySettings), to: menu)
+            item.toolTip = accessibilityHint
+        }
         menu.addItem(.separator()); add("Quit", action: #selector(NSApplication.terminate(_:)), key: "q", to: menu)
         statusItem.menu = menu
     }
@@ -68,10 +83,17 @@ import YiyiCore
 
     private func runCommand(index: Int) {
         guard configs.config.commands.indices.contains(index) else { return }
-        guard SelectionCapture.isTrusted(prompt: false) else { showAccessibilityAlert(); return }
         let command = configs.config.commands[index]
+        let trusted = SelectionCapture.isTrusted(prompt: false)
+        if !trusted { requestAccessibilityOnce() }
         Task {
-            guard let input = await SelectionCapture.capture(), !input.isEmpty else { panel.showError(command: command.name, message: "No selected or clipboard text found"); return }
+            guard let input = await SelectionCapture.capture(synthesize: trusted), !input.isEmpty else {
+                panel.showError(command: command.name,
+                                message: trusted ? "No selected or clipboard text found"
+                                                 : "Nothing on the clipboard — copy the text first, or enable Accessibility",
+                                detail: trusted ? nil : accessibilityHint)
+                return
+            }
             do {
                 let provider = try resolveProvider(config: configs.config, command: command)
                 let key = try configs.apiKey(for: provider.name)
@@ -99,11 +121,21 @@ import YiyiCore
         } else { panel.showError(command: command.name, provider: name, model: provider?.model ?? "", message: "\(name): \(error.localizedDescription)") }
     }
 
-    private func showAccessibilityAlert() {
+    /// LSUIElement apps must never run a modal alert here: an unseen `runModal()` blocks the
+    /// main run loop and silently kills every later hotkey. Ask tccd once per launch instead
+    /// and keep working in clipboard-only mode.
+    private var accessibilityHint: String {
+        "Enable yiyi in System Settings → Privacy & Security → Accessibility to translate the current selection. Until then yiyi translates the clipboard."
+    }
+
+    private func requestAccessibilityOnce() {
+        guard !didRequestAccessibility else { return }
+        didRequestAccessibility = true
         _ = SelectionCapture.isTrusted(prompt: true)
-        let alert = NSAlert(); alert.messageText = "Accessibility permission required"
-        alert.informativeText = "yiyi needs Accessibility access to copy selected text. Enable yiyi in System Settings → Privacy & Security → Accessibility, then trigger the command again."
-        alert.addButton(withTitle: "Open Accessibility Settings"); alert.addButton(withTitle: "Cancel"); NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+    }
+
+    @objc private func openAccessibilitySettings() {
+        _ = SelectionCapture.isTrusted(prompt: true)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
     }
 }

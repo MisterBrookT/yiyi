@@ -27,11 +27,22 @@ The installer builds an ad-hoc-signed release app, installs it to `/Applications
 
 ## First use
 
-1. Trigger **Translate to Chinese** with <kbd>⌘</kbd><kbd>-</kbd>.
-2. Click **Open Accessibility Settings** and enable yiyi under **Privacy & Security → Accessibility**. This allows yiyi to synthesize Copy in the frontmost app.
-3. Trigger the hotkey again. The result appears and is copied automatically.
+On first launch a small panel explains the hotkeys and offers to enable Accessibility:
+press <kbd>⏎</kbd> to open **Privacy & Security → Accessibility** and switch yiyi on, or
+<kbd>esc</kbd> to skip. The menu keeps an **Enable Accessibility…** item until it is granted.
 
-If no selection can be copied, yiyi translates the existing clipboard. Escape closes the panel; Command-C copies its selectable result.
+Accessibility is optional and only widens the input:
+
+| Accessibility | Input yiyi translates |
+| --- | --- |
+| Granted | The selection in the frontmost app (read with a synthetic Copy), else the clipboard |
+| Not granted | The clipboard — copy the text, then press the hotkey |
+
+Then press <kbd>⌘</kbd><kbd>-</kbd>. The panel shows `working`, then `done`, and the result is
+copied automatically. <kbd>esc</kbd> closes it; <kbd>⌘</kbd><kbd>c</kbd> copies the selectable result.
+
+Global hotkeys are registered with Carbon, so they respond to real key presses only —
+synthetic `System Events` keystrokes do not reach them.
 
 ## Configuration
 

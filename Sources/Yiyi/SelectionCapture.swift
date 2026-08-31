@@ -7,12 +7,16 @@ import ApplicationServices
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    static func capture() async -> String? {
+    /// Reads the frontmost selection by synthesizing Cmd+C. Without Accessibility the
+    /// synthetic key event is silently dropped by the window server, so `synthesize: false`
+    /// skips it entirely and yiyi runs in clipboard-only mode.
+    static func capture(synthesize: Bool = true) async -> String? {
         let pasteboard = NSPasteboard.general
         let fallback = pasteboard.string(forType: .string)
         let saved = pasteboard.pasteboardItems?.map { item in
             item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { values, type in values[type] = item.data(forType: type) }
         } ?? []
+        guard synthesize else { return fallback }
         let oldCount = pasteboard.changeCount
         let source = CGEventSource(stateID: .hidSystemState)
         let down = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true)

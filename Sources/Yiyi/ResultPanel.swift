@@ -54,7 +54,10 @@ private final class ThemeFillView: NSView {
     private let sourceLabel = NSTextField(labelWithString: "")
     private let textView = NSTextView()
     private let providerLabel = NSTextField(labelWithString: "")
+    private let hintsLabel = NSTextField(labelWithString: "esc close   ⌘c copy")
     private var keyMonitor: Any?
+    private var shownAt = Date.distantPast
+    private var confirm: (() -> Void)?
     private let closesOnResign: Bool
 
     init(closesOnResign: Bool = true) {
@@ -80,7 +83,7 @@ private final class ThemeFillView: NSView {
         scroll.widthAnchor.constraint(equalToConstant: 388).isActive = true
         let body = NSStackView(views: [sourceLabel, scroll]); body.orientation = .vertical; body.alignment = .leading; body.spacing = 8; body.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
 
-        let hints = NSTextField(labelWithString: "esc close   ⌘c copy"); hints.font = .monospacedSystemFont(ofSize: 10, weight: .regular); hints.textColor = Theme.muted
+        let hints = hintsLabel; hints.font = .monospacedSystemFont(ofSize: 10, weight: .regular); hints.textColor = Theme.muted
         providerLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular); providerLabel.textColor = Theme.muted; providerLabel.alignment = .right
         let footer = row([hints, providerLabel], height: 24)
         let stack = NSStackView(views: [header, divider(), body, divider(), footer]); stack.orientation = .vertical; stack.alignment = .width; stack.spacing = 0
@@ -104,6 +107,13 @@ private final class ThemeFillView: NSView {
         statusLabel.stringValue = "failed"; statusLabel.textColor = Theme.danger
         let value = detail.map { "\(message)\n\n\($0)" } ?? message
         setBody(value, color: Theme.danger, font: .systemFont(ofSize: 15)); resizeAndShow()
+    }
+
+    /// Quiet, non-blocking stand-in for a modal dialog: same panel, Return runs `confirm`.
+    func showNotice(command: String, message: String, hints: String, confirm: (() -> Void)?) {
+        configure(command: command, source: "", provider: "", model: "")
+        statusLabel.stringValue = ""; self.confirm = confirm; hintsLabel.stringValue = hints
+        setBody(message, color: Theme.ink, font: .systemFont(ofSize: 15)); resizeAndShow()
     }
 
     private func configure(command: String, source: String, provider: String, model: String) {
@@ -137,16 +147,26 @@ private final class ThemeFillView: NSView {
             let y = min(max(mouse.y - panel.frame.height / 3, safeFrame.minY), safeFrame.maxY - panel.frame.height)
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
+        shownAt = Date()
         NSApp.activate(ignoringOtherApps: true); panel.alphaValue = 0; panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
         if keyMonitor == nil {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                if event.keyCode == 53 { self?.panel.orderOut(nil); return nil }
-                if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c" { self?.copy(); return nil }
+                guard let self else { return event }
+                if event.keyCode == 53 { dismiss(); return nil }
+                if event.keyCode == 36, let confirm { dismiss(); confirm(); return nil }
+                if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c" { copyResult(); return nil }
                 return event
             }
         }
     }
-    private func copy() { guard !textView.string.isEmpty else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(textView.string, forType: .string) }
-    func windowDidResignKey(_ notification: Notification) { if closesOnResign { panel.orderOut(nil) } }
+
+    private func dismiss() { confirm = nil; hintsLabel.stringValue = "esc close   ⌘c copy"; panel.orderOut(nil) }
+    private func copyResult() { guard !textView.string.isEmpty else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(textView.string, forType: .string) }
+    /// Activation is asynchronous: the panel briefly becomes key and resigns again before the
+    /// app is frontmost, which used to hide it instantly. Ignore resign inside that window.
+    func windowDidResignKey(_ notification: Notification) {
+        guard closesOnResign, Date().timeIntervalSince(shownAt) > 0.6 else { return }
+        dismiss()
+    }
 }
