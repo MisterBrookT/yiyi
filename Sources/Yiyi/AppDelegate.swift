@@ -242,8 +242,12 @@ import YiyiCore
         guard state.trusted else { return }
         accessibilityPollTimer?.invalidate()
         accessibilityPollTimer = nil
+        let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
+        NSLog("yiyi: Accessibility became trusted; hotkeys re-registered tap=%@", hotkeys.superKeyStatus)
         rebuildMenu()
-        relaunch()
+        if !errors.isEmpty {
+            panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n"))
+        }
     }
 
     @objc private func relaunch() {

@@ -123,6 +123,52 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertEqual(config.commands.map(\.hotkey), ["super+-", "cmd+shift+-"])
     }
 
+    func testSuperKeyLeaderHeldThenBoundKeyFires() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x10)
+        ]), [0])
+    }
+
+    func testSuperKeyLeaderHeldThenDifferentKeyDoesNotFire() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
+            .init(type: .keyDown, keyCode: 18, deviceFlags: 0x10)
+        ]), [])
+    }
+
+    func testSuperKeyKeyWithoutLeaderDoesNotFire() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0)
+        ]), [])
+    }
+
+    func testSuperKeyLeftCommandDoesNotArmRightCommand() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .flagsChanged, keyCode: 55, deviceFlags: 0),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0)
+        ]), [])
+    }
+
+    func testSuperKeyReleasedThenKeyDoesNotFire() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0)
+        ]), [])
+    }
+
+    func testSuperKeyKeyDownWithCommandMaskStillFires() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x0010_0010)
+        ]), [0])
+    }
+
+    private func superKeyMatches(_ events: [SuperKeyEvent]) -> [Int] {
+        matchedSuperKeyCommands(superKey: .rightCommand, bindings: [27: 0], events: events)
+    }
+
     func testFormattedHotkeysRoundTrip() throws {
         let keys: [UInt32] = [0, 17, 24, 27, 36, 48, 49, 53]
         let modifiers: [UInt32] = [

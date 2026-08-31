@@ -42,6 +42,54 @@ public enum HotkeyBinding: Equatable, Sendable {
     case superKey(keyCode: UInt32)
 }
 
+public enum SuperKeyEventType: Sendable {
+    case flagsChanged
+    case keyDown
+}
+
+public struct SuperKeyEvent: Sendable {
+    public let type: SuperKeyEventType
+    public let keyCode: UInt32
+    public let deviceFlags: UInt64
+
+    public init(type: SuperKeyEventType, keyCode: UInt32, deviceFlags: UInt64) {
+        self.type = type
+        self.keyCode = keyCode
+        self.deviceFlags = deviceFlags
+    }
+}
+
+public struct SuperKeyMatcher: Sendable {
+    private let leaderFlag: UInt64
+    private let bindings: [UInt32: Int]
+    private var leaderHeld = false
+
+    public init(superKey: SuperKey, bindings: [UInt32: Int]) {
+        leaderFlag = superKey.deviceFlag
+        self.bindings = bindings
+    }
+
+    public mutating func consume(_ event: SuperKeyEvent) -> Int? {
+        switch event.type {
+        case .flagsChanged:
+            leaderHeld = leaderFlag != 0 && event.deviceFlags & leaderFlag != 0
+            return nil
+        case .keyDown:
+            guard leaderHeld else { return nil }
+            return bindings[event.keyCode]
+        }
+    }
+}
+
+public func matchedSuperKeyCommands(
+    superKey: SuperKey,
+    bindings: [UInt32: Int],
+    events: [SuperKeyEvent]
+) -> [Int] {
+    var matcher = SuperKeyMatcher(superKey: superKey, bindings: bindings)
+    return events.compactMap { matcher.consume($0) }
+}
+
 public enum HotkeyParseError: Error, Equatable { case empty, unknownModifier(String), unknownKey(String), missingKey, multipleKeys }
 
 public enum HotkeyModifier {

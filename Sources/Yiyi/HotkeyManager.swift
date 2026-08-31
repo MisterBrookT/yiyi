@@ -9,6 +9,8 @@ extension Notification.Name { static let yiyiHotkey = Notification.Name("cc.blac
     private var handler: EventHandlerRef?
     private let superKeyMonitor = SuperKeyMonitor()
     var superKeyStatus: String { superKeyMonitor.status }
+    var superKeyTapCreated: Bool { superKeyMonitor.isCreated }
+    var superKeyTapEnabled: Bool { superKeyMonitor.isEnabled }
 
     init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -22,7 +24,7 @@ extension Notification.Name { static let yiyiHotkey = Notification.Name("cc.blac
 
     func register(_ commands: [CommandConfig], superKey: SuperKey) -> [String] {
         unregisterAll()
-        superKeyMonitor.configure(superKey: superKey, commands: commands)
+        superKeyMonitor.configure(superKey: superKey, commands: commands, trusted: AXIsProcessTrusted())
         var errors: [String] = []
         for (index, command) in commands.enumerated() {
             do {

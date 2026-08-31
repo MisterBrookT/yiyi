@@ -2,6 +2,35 @@ import AppKit
 import Foundation
 import YiyiCore
 
+if CommandLine.arguments.contains("--diagnose") {
+    Task { @MainActor in
+        do {
+            let manager = ConfigManager()
+            try manager.load()
+            let hotkeys = HotkeyManager()
+            let errors = hotkeys.register(manager.config.commands, superKey: manager.config.superKey)
+            print("trusted=\(AXIsProcessTrusted())")
+            print("tap.created=\(hotkeys.superKeyTapCreated)")
+            print("tap.enabled=\(hotkeys.superKeyTapEnabled)")
+            print("tap.status=\(hotkeys.superKeyStatus)")
+            print("leader=\(manager.config.superKey.rawValue) keyCode=\(manager.config.superKey.keyCode.map(String.init) ?? "none") deviceFlag=0x\(String(manager.config.superKey.deviceFlag, radix: 16))")
+            for (index, command) in manager.config.commands.enumerated() {
+                let kind: String
+                switch try effectiveBinding(command.hotkey, superKey: manager.config.superKey) {
+                case let .superKey(keyCode): kind = "superKey keyCode=\(keyCode)"
+                case let .carbon(parsed): kind = "carbon keyCode=\(parsed.keyCode) modifiers=0x\(String(parsed.modifiers, radix: 16))"
+                }
+                print("binding[\(index)]=\(command.name): \(command.hotkey) -> \(kind)")
+            }
+            if !errors.isEmpty { print("errors=\(errors.joined(separator: "; "))") }
+            exit(errors.isEmpty && hotkeys.superKeyTapEnabled ? 0 : 1)
+        } catch {
+            fputs("yiyi diagnose: \(error.localizedDescription)\n", stderr)
+            exit(1)
+        }
+    }
+    RunLoop.main.run()
+} else
 if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--translate" {
     let input = CommandLine.arguments.dropFirst(2).joined(separator: " ")
     Task { @MainActor in
