@@ -4,10 +4,13 @@ import YiyiCore
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private let configs = ConfigManager(), hotkeys = HotkeyManager(), panel = ResultPanelController()
-    private lazy var settings = SettingsWindowController(configs: configs) { [weak self] in self?.hotkeys.superKeyStatus ?? "off" }
+    private lazy var settings = SettingsWindowController(
+        configs: configs,
+        accessibilityStatus: { [weak self] in self?.accessibilityStatus() ?? AccessibilityStatus(trusted: false, superKeyTapStatus: "unknown", signatureIdentity: "unavailable", advice: .awaitGrant) },
+        requestAccessibility: { [weak self] in self?.openAccessibilitySettings() }
+    )
     private var statusItem: NSStatusItem!
     private var lastResult: String?
-    private var didRequestAccessibility = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem.button?.title = "译"
@@ -17,17 +20,9 @@ import YiyiCore
         }
         configs.onChange = { [weak self] in self?.configDidChange() }
         reloadConfig(showErrors: true)
-        if !SelectionCapture.isTrusted(prompt: false), !UserDefaults.standard.bool(forKey: "yiyi.onboarded") {
-            UserDefaults.standard.set(true, forKey: "yiyi.onboarded")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
-        }
+        handleAccessibilityAdvice(AccessibilityState.observe().advice)
     }
 
-    private func showOnboarding() {
-        panel.showNotice(command: "yiyi",
-                         message: "⌘- translates the selected text, ⌘⇧- translates it into English.\n\nTo read the selection in other apps, yiyi needs Accessibility access. Without it, it translates whatever is on the clipboard.",
-                         hints: "⏎ enable accessibility   esc later") { [weak self] in self?.openAccessibilitySettings() }
-    }
 
     private func rebuildMenu() {
         let menu = NSMenu()
@@ -94,8 +89,9 @@ import YiyiCore
     private func runCommand(index: Int) {
         guard configs.config.commands.indices.contains(index) else { return }
         let command = configs.config.commands[index]
-        let trusted = SelectionCapture.isTrusted(prompt: false)
-        if !trusted { requestAccessibilityOnce() }
+        let accessibility = AccessibilityState.observe()
+        let trusted = accessibility.trusted
+        if accessibility.advice == .staleGrant { showStaleGrantNotice() }
         Task {
             guard let input = await SelectionCapture.capture(synthesize: trusted), !input.isEmpty else {
                 panel.showError(command: command.name,
@@ -131,21 +127,43 @@ import YiyiCore
         } else { panel.showError(command: command.name, provider: name, model: provider?.model ?? "", message: "\(name): \(error.localizedDescription)") }
     }
 
-    /// LSUIElement apps must never run a modal alert here: an unseen `runModal()` blocks the
-    /// main run loop and silently kills every later hotkey. Ask tccd once per launch instead
-    /// and keep working in clipboard-only mode.
     private var accessibilityHint: String {
         "Enable yiyi in System Settings → Privacy & Security → Accessibility to translate the current selection. Until then yiyi translates the clipboard."
     }
 
-    private func requestAccessibilityOnce() {
-        guard !didRequestAccessibility else { return }
-        didRequestAccessibility = true
-        _ = SelectionCapture.isTrusted(prompt: true)
+    private var staleGrantMessage: String {
+        "Accessibility was granted to an earlier build of yiyi. Switch yiyi off and on again in System Settings → Privacy & Security → Accessibility."
+    }
+
+    private func accessibilityStatus() -> AccessibilityStatus {
+        let state = AccessibilityState.observe()
+        return AccessibilityStatus(
+            trusted: state.trusted,
+            superKeyTapStatus: hotkeys.superKeyStatus,
+            signatureIdentity: AccessibilityState.shortSignature(state.signature),
+            advice: state.advice
+        )
+    }
+
+    private func handleAccessibilityAdvice(_ advice: AccessibilityAdvice) {
+        switch advice {
+        case .promptOnce:
+            AccessibilityState.requestSystemPrompt()
+        case .staleGrant:
+            showStaleGrantNotice()
+        case .ok, .awaitGrant:
+            break
+        }
+    }
+
+    private func showStaleGrantNotice() {
+        panel.showNotice(command: "Accessibility",
+                         message: staleGrantMessage,
+                         hints: "⏎ enable accessibility   esc later") { [weak self] in self?.openAccessibilitySettings() }
     }
 
     @objc private func openAccessibilitySettings() {
-        _ = SelectionCapture.isTrusted(prompt: true)
+        AccessibilityState.requestSystemPrompt()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
     }
 }

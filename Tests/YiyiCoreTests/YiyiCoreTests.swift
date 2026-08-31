@@ -2,6 +2,15 @@ import XCTest
 @testable import YiyiCore
 
 final class YiyiCoreTests: XCTestCase {
+
+    func testAccessibilityAdviceMatrix() {
+        XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: false, grantedSignature: nil, currentSignature: "current"), .ok)
+        XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: true, grantedSignature: "old", currentSignature: "current"), .ok)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: false, grantedSignature: nil, currentSignature: "current"), .promptOnce)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: "old", currentSignature: "current"), .staleGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: "current", currentSignature: "current"), .awaitGrant)
+        XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, grantedSignature: nil, currentSignature: "current"), .awaitGrant)
+    }
     func testPromptTemplateAliases() throws {
         XCTAssertEqual(try renderPrompt("A {selection} B {input}", input: "hello"), "A hello B hello")
         XCTAssertThrowsError(try renderPrompt("No variable", input: "hello")) {

@@ -23,13 +23,17 @@ Requires macOS 14+ and Swift 6.
 ./install.sh
 ```
 
-The installer builds an ad-hoc-signed release app, installs it to `/Applications` (or `~/Applications` without write access), and launches it.
+The installer builds a release app, signs it with a stable identity, installs it to `/Applications` (or `~/Applications` without write access), and launches it. It prefers `YIYI_CODESIGN_IDENTITY`, then an existing Developer ID Application identity, and otherwise creates and reuses a local `yiyi Local Signing` identity in the login keychain.
 
 ## First use
 
 On first launch a small panel explains the hotkeys and offers to enable Accessibility:
 press <kbd>⏎</kbd> to open **Privacy & Security → Accessibility** and switch yiyi on, or
 <kbd>esc</kbd> to skip. The menu keeps an **Enable Accessibility…** item until it is granted.
+
+### Permissions survive updates
+
+Because yiyi keeps the same signing identity, macOS recognizes rebuilt and reinstalled copies as the same app, so an existing Accessibility grant persists across updates. Accessibility only needs to be granted again when the signing identity itself changes (for example, the one-time move from an older ad-hoc build to stable signing): open **System Settings → Privacy & Security → Accessibility**, enable **yiyi**, and relaunch it.
 
 Accessibility is optional and only widens the input:
 

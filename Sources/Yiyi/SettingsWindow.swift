@@ -4,14 +4,16 @@ import YiyiCore
 
 @MainActor final class SettingsWindowController: NSWindowController, NSTextViewDelegate {
     private let configs: ConfigManager
-    private let superKeyStatus: () -> String
+    private let accessibilityStatus: () -> AccessibilityStatus
+    private let requestAccessibility: () -> Void
     private let contentStack = NSStackView()
     private let settingsDocumentView = SettingsDocumentView(frame: NSRect(x: 0, y: 0, width: 512, height: 1))
     private var selectedProvider: String
 
-    init(configs: ConfigManager, superKeyStatus: @escaping () -> String) {
+    init(configs: ConfigManager, accessibilityStatus: @escaping () -> AccessibilityStatus, requestAccessibility: @escaping () -> Void) {
         self.configs = configs
-        self.superKeyStatus = superKeyStatus
+        self.accessibilityStatus = accessibilityStatus
+        self.requestAccessibility = requestAccessibility
         self.selectedProvider = configs.config.defaultProvider
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 720),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -95,9 +97,30 @@ import YiyiCore
     private func superKeySection() -> NSView {
         let values = SuperKey.allCases
         let popup = popup(values.map(\.displayName), selected: configs.config.superKey.displayName, action: #selector(changeSuperKey(_:)))
-        let hint = label("Bind a command as super+t. Requires Accessibility. Status: \(superKeyStatus())", mono: true, secondary: true); hint.maximumNumberOfLines = 3; hint.lineBreakMode = .byWordWrapping
         popup.setAccessibilityIdentifier("superkey.popup")
-        return column([row("Leader modifier", popup), hint], spacing: 8)
+        let status = accessibilityStatus()
+        let trusted = label(status.trusted ? "Yes" : "No", mono: true)
+        trusted.setAccessibilityIdentifier("accessibility.trusted")
+        trusted.setAccessibilityValue(status.trusted ? "yes" : "no")
+        let tap = label(status.superKeyTapStatus, mono: true)
+        tap.setAccessibilityIdentifier("accessibility.superkey-tap")
+        tap.setAccessibilityValue(status.superKeyTapStatus)
+        let signature = label(status.signatureIdentity, mono: true)
+        signature.setAccessibilityIdentifier("accessibility.signature")
+        signature.setAccessibilityValue(status.signatureIdentity)
+        var rows: [NSView] = [row("Leader modifier", popup), row("Accessibility trusted", trusted), row("Superkey tap", tap), row("Signature", signature)]
+        if status.advice == .staleGrant {
+            let warning = label("Accessibility was granted to an earlier build of yiyi. Switch yiyi off and on again in System Settings → Privacy & Security → Accessibility.")
+            warning.maximumNumberOfLines = 4; warning.lineBreakMode = .byWordWrapping; warning.textColor = Theme.danger
+            warning.setAccessibilityIdentifier("accessibility.stale-grant")
+            rows.append(row("", warning))
+        }
+        if !status.trusted {
+            let enable = NSButton(title: "Enable Accessibility…", target: self, action: #selector(enableAccessibility))
+            enable.setAccessibilityIdentifier("accessibility.enable")
+            rows.append(row("", enable))
+        }
+        return column(rows, spacing: 8)
     }
 
     private func behaviorSection() -> NSView {
@@ -135,6 +158,7 @@ import YiyiCore
     @objc private func commandEffort(_ sender: NSPopUpButton) { let raw = sender.titleOfSelectedItem; try? configs.setCommand(sender.tag, reasoningEffort: raw == "inherit" ? .some(nil) : .some(raw.flatMap(ReasoningEffort.init(rawValue:)))); rebuild() }
     @objc private func changeSuperKey(_ sender: NSPopUpButton) { guard let selected = sender.titleOfSelectedItem, let value = SuperKey.allCases.first(where: { $0.displayName == selected }) else { return }; try? configs.setSuperKey(value); rebuild() }
     @objc private func changeAutoCopy(_ sender: NSButton) { try? configs.setAutoCopy(sender.state == .on) }
+    @objc private func enableAccessibility() { requestAccessibility(); rebuild() }
     @objc private func addCommand() { try? configs.addCommand(); rebuild() }
     @objc private func removeCommand(_ sender: NSButton) { try? configs.deleteCommand(at: sender.tag); rebuild() }
     @objc private func commitField(_ sender: NSTextField) {

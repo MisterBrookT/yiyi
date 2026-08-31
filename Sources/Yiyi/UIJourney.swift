@@ -14,7 +14,18 @@ import YiyiCore
         try encoder.encode(seed).write(to: manager.fileURL)
     }
     try manager.load()
-    let controller = SettingsWindowController(configs: manager) { "unavailable: Accessibility not granted" }
+    let controller = SettingsWindowController(
+        configs: manager,
+        accessibilityStatus: {
+            AccessibilityStatus(
+                trusted: false,
+                superKeyTapStatus: "unavailable: Accessibility not granted",
+                signatureIdentity: "identity:cc.blackblue.yiyi:0123456789ab",
+                advice: .staleGrant
+            )
+        },
+        requestAccessibility: {}
+    )
     var checks: [[String: Any]] = []
     func check(_ name: String, _ condition: @autoclosure () -> Bool, _ detail: String) throws {
         let passed = condition(); checks.append(["name": name, "passed": passed, "detail": detail]); if !passed { throw NSError(domain: "UIJourney", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(name): \(detail)"]) }
@@ -26,6 +37,17 @@ import YiyiCore
     let light = NSAppearance(named: .aqua)!, dark = NSAppearance(named: .darkAqua)!
     controller.prepareOffscreen(appearance: light)
     for section in ["provider", "shortcuts", "superkey"] { try check("section.\(section)", controller.control(accessibilityID: "section.\(section)") != nil, "section must exist in scroll content") }
+    let permissionValues = [
+        "accessibility.trusted": "No",
+        "accessibility.superkey-tap": "unavailable: Accessibility not granted",
+        "accessibility.signature": "identity:cc.blackblue.yiyi:0123456789ab"
+    ]
+    for (id, expected) in permissionValues {
+        let actual = controller.control(accessibilityID: id)?.accessibilityValue() as? String
+        try check("permission.\(id)", actual == expected, "\(id) accessible value is \(expected), got \(actual ?? "nil")")
+    }
+    try check("permission.stale-grant", controller.control(accessibilityID: "accessibility.stale-grant") != nil, "stale grant guidance renders")
+    try check("permission.enable", controller.control(accessibilityID: "accessibility.enable") != nil, "user-initiated permission control renders")
     try controller.renderPNG(to: outdir.appendingPathComponent("light-top.png"))
     try controller.renderPNG(to: outdir.appendingPathComponent("light-bottom.png"), bottom: true)
 
