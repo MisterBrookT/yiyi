@@ -1,6 +1,9 @@
 import AppKit
 import Carbon
 import YiyiCore
+import OSLog
+
+private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "settings")
 
 @MainActor final class SettingsWindowController: NSWindowController, NSTextViewDelegate, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
     enum Pane: String, CaseIterable {
@@ -61,8 +64,26 @@ import YiyiCore
     func show() {
         rebuild(resize: true, animate: false)
         if !centered { window?.center(); centered = true }
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        logWindowState("requested")
+        // A status-item menu is still tracking while its action runs. Activating an
+        // accessory app here is undone when AppKit closes the menu and restores the
+        // previously active application, leaving this visible window non-key.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            self.logWindowState("presented")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.logWindowState("settled")
+            }
+        }
+    }
+
+    private func logWindowState(_ phase: String) {
+        guard let window else { return }
+        let keyWindow = NSApp.keyWindow.map { String(describing: type(of: $0)) } ?? "nil"
+        let responder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+        settingsLogger.notice("\(phase, privacy: .public) active=\(NSApp.isActive) key=\(window.isKeyWindow) main=\(window.isMainWindow) appKeyWindow=\(keyWindow, privacy: .public) firstResponder=\(responder, privacy: .public)")
     }
 
     private func buildChrome() {
