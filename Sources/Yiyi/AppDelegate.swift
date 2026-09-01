@@ -89,7 +89,14 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
     @objc private func reload() { reloadConfig(showErrors: true) }
     @objc private func editConfig() { NSWorkspace.shared.open(configs.fileURL) }
     @objc private func openSettings() { settings.show() }
-    @objc private func copyLast() { if let lastResult { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(lastResult, forType: .string) } }
+    @objc private func copyLast() {
+        if let lastResult {
+            let before = NSPasteboard.general.changeCount
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(lastResult, forType: .string)
+            appLogger.notice("changeCount \(before)->\(NSPasteboard.general.changeCount) entity=copyLast")
+        }
+    }
     @objc private func selectProvider(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
         do { try configs.setDefaultProvider(name); rebuildMenu() } catch { panel.showError(message: "Could not save provider", detail: error.localizedDescription) }
@@ -151,7 +158,12 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 let result = try await OpenAIClient().complete(prompt: prompt, provider: provider, apiKey: key)
                 appLogger.notice("provider completed characters=\(result.count)")
                 lastResult = result
-                if configs.config.autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result, forType: .string) }
+                if configs.config.autoCopy {
+                    let before = NSPasteboard.general.changeCount
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(result, forType: .string)
+                    appLogger.notice("changeCount \(before)->\(NSPasteboard.general.changeCount) entity=autoCopy")
+                }
                 panel.showResult(result); rebuildMenu()
             } catch let error as OpenAIError {
                 showProviderError(error, command: command)

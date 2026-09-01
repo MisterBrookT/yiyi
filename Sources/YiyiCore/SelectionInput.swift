@@ -26,18 +26,31 @@ public func shouldSynthesizeSelection(trusted: Bool) -> Bool {
 
 public func chooseCaptureInput(
     trusted: Bool,
-    changeCountAdvanced: Bool,
-    capturedText: String?,
+    sentinelText: String?,
+    snapshotText: String?,
+    observedText: String?,
+    accessibilitySelectedText: String?,
     clipboardText: String?
 ) -> CaptureDecision {
-    if trusted, changeCountAdvanced, let capturedText, !capturedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        return CaptureDecision(text: capturedText, source: .selection)
+    let observed = observedText.flatMap(nonEmpty)
+    let axSelection = accessibilitySelectedText.flatMap(nonEmpty)
+    let contradicted = axSelection != nil && observed != axSelection
+    let isConfirmedSelection = trusted
+        && observed != nil
+        && observed != sentinelText
+        && observed != snapshotText
+        && !contradicted
+
+    if isConfirmedSelection, let observed {
+        return CaptureDecision(text: observed, source: .selection)
     }
 
-    let clipboard = clipboardText.flatMap {
-        $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
-    }
+    let clipboard = clipboardText.flatMap(nonEmpty)
     let hint = trusted ? nil : accessibilityClipboardHint
     guard let clipboard else { return CaptureDecision(text: nil, source: .empty, hint: hint) }
     return CaptureDecision(text: clipboard, source: .clipboard, hint: hint)
+}
+
+private func nonEmpty(_ text: String) -> String? {
+    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
 }

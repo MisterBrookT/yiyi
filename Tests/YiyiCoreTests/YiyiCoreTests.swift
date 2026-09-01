@@ -14,23 +14,117 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertEqual(accessibilityAdvice(trusted: false, hasPrompted: true, repairAttempted: true, grantedSignature: nil, currentSignature: "current"), .awaitGrant)
     }
 
-    func testSelectionCaptureUsesAdvancedNonEmptySelection() {
+    func testCurrentInvocationCopyIsSelectionWhenAXConfirmsIt() {
         XCTAssertEqual(
-            chooseCaptureInput(trusted: true, changeCountAdvanced: true, capturedText: "selected", clipboardText: "old"),
-            CaptureDecision(text: "selected", source: .selection)
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel",
+                snapshotText: "old clipboard",
+                observedText: "current selection",
+                accessibilitySelectedText: "current selection",
+                clipboardText: "old clipboard"
+            ),
+            CaptureDecision(text: "current selection", source: .selection)
+        )
+    }
+    func testAXUnavailableStillAcceptsFreshObservedCopy() {
+        XCTAssertEqual(
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel",
+                snapshotText: "old clipboard",
+                observedText: "terminal selection",
+                accessibilitySelectedText: nil,
+                clipboardText: "old clipboard"
+            ),
+            CaptureDecision(text: "terminal selection", source: .selection)
         )
     }
 
-    func testSelectionCaptureFallsBackWhenCapturedTextIsWhitespace() {
+    func testAXContradictionRejectsObservedCopy() {
         XCTAssertEqual(
-            chooseCaptureInput(trusted: true, changeCountAdvanced: true, capturedText: " \n ", clipboardText: "clipboard"),
-            CaptureDecision(text: "clipboard", source: .clipboard)
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel",
+                snapshotText: "old clipboard",
+                observedText: "late prior selection",
+                accessibilitySelectedText: "current selection",
+                clipboardText: "old clipboard"
+            ),
+            CaptureDecision(text: "old clipboard", source: .clipboard)
         )
     }
 
-    func testSelectionCaptureFallsBackWhenChangeCountDoesNotAdvance() {
+    func testObservedSentinelFallsBackToClipboard() {
         XCTAssertEqual(
-            chooseCaptureInput(trusted: true, changeCountAdvanced: false, capturedText: "ignored", clipboardText: "clipboard"),
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel",
+                snapshotText: "old clipboard",
+                observedText: "sentinel",
+                accessibilitySelectedText: nil,
+                clipboardText: "old clipboard"
+            ).source,
+            .clipboard
+        )
+    }
+
+    func testObservedSnapshotConservativelyFallsBackToClipboard() {
+        // Deliberate false-negative: an identical re-copy cannot be distinguished from no copy.
+        XCTAssertEqual(
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel",
+                snapshotText: "same text",
+                observedText: "same text",
+                accessibilitySelectedText: nil,
+                clipboardText: "same text"
+            ).source,
+            .clipboard
+        )
+    }
+
+
+    func testLateCopyFromPreviousInvocationIsNotSelection() {
+        XCTAssertEqual(
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel-n-plus-one",
+                snapshotText: "translation written by autoCopy",
+                observedText: "selection from press N",
+                accessibilitySelectedText: "selection from press N+1",
+                clipboardText: "translation written by autoCopy"
+            ),
+            CaptureDecision(text: "translation written by autoCopy", source: .clipboard)
+        )
+    }
+
+    func testSentinelRestoreAndAutoCopyWritesAreNotSelection() {
+        for selfWrittenText in ["sentinel", "restored clipboard", "autoCopy translation"] {
+            XCTAssertEqual(
+                chooseCaptureInput(
+                    trusted: true,
+                    sentinelText: "sentinel",
+                    snapshotText: "restored clipboard",
+                    observedText: selfWrittenText,
+                    accessibilitySelectedText: "current selection",
+                    clipboardText: "restored clipboard"
+                ).source,
+                .clipboard
+            )
+        }
+    }
+
+    func testUnconfirmedCopyFallsBackToClipboard() {
+        XCTAssertEqual(
+            chooseCaptureInput(
+                trusted: true,
+                sentinelText: "sentinel",
+                snapshotText: "clipboard",
+                observedText: nil,
+                accessibilitySelectedText: "selected but copy suppressed",
+                clipboardText: "clipboard"
+            ),
             CaptureDecision(text: "clipboard", source: .clipboard)
         )
     }
@@ -38,8 +132,10 @@ final class YiyiCoreTests: XCTestCase {
     func testRegressionUntrustedProcessLabelsClipboardAndExplainsRelaunch() {
         let decision = chooseCaptureInput(
             trusted: false,
-            changeCountAdvanced: false,
-            capturedText: nil,
+            sentinelText: nil,
+            snapshotText: "stale clipboard",
+            observedText: nil,
+            accessibilitySelectedText: nil,
             clipboardText: "stale clipboard"
         )
         XCTAssertEqual(decision.source, .clipboard)
@@ -51,8 +147,10 @@ final class YiyiCoreTests: XCTestCase {
     func testUntrustedProcessWithEmptyClipboardIsEmpty() {
         let decision = chooseCaptureInput(
             trusted: false,
-            changeCountAdvanced: false,
-            capturedText: nil,
+            sentinelText: nil,
+            snapshotText: "  ",
+            observedText: nil,
+            accessibilitySelectedText: nil,
             clipboardText: "  "
         )
         XCTAssertEqual(decision.source, .empty)
