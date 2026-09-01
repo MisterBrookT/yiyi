@@ -11,6 +11,7 @@ final class SuperKeyMonitor {
     private var superKey: SuperKey = .none
     private var bindings: [UInt32: Int] = [:]
     private var creationFailure: String?
+    var onMatch: ((Int) -> Void)?
     private(set) var status = "off"
     var isCreated: Bool { tap != nil }
     var isEnabled: Bool { tap.map(CGEvent.tapIsEnabled(tap:)) ?? false }
@@ -45,7 +46,15 @@ final class SuperKeyMonitor {
         superKeyLogger.notice("yiyi: superkey tap created enabled=\(self.isEnabled) bindings=\(self.bindings.count) leader=\(self.superKey.rawValue, privacy: .public)")
     }
 
+    func consumeForSelfTest(type: CGEventType, keyCode: CGKeyCode, flags: UInt64) {
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: type != .keyUp) else { return }
+        event.type = type
+        event.flags = CGEventFlags(rawValue: flags)
+        _ = handle(type: type, event: event)
+    }
+
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
@@ -60,13 +69,20 @@ final class SuperKeyMonitor {
         case .keyDown: eventType = .keyDown
         default: return Unmanaged.passUnretained(event)
         }
+        if keyCode == superKey.keyCode.map(UInt32.init) || bindings[keyCode] != nil {
+            superKeyLogger.notice("tap callback type=\(type.rawValue) keyCode=\(keyCode) flags=0x\(String(event.flags.rawValue, radix: 16), privacy: .public) enabled=\(self.isEnabled)")
+        }
         let description = SuperKeyEvent(
             type: eventType,
-            keyCode: UInt32(event.getIntegerValueField(.keyboardEventKeycode)),
+            keyCode: keyCode,
             deviceFlags: event.flags.rawValue
         )
-        guard let index = matcher.consume(description) else { return Unmanaged.passUnretained(event) }
-        superKeyLogger.notice("yiyi: superkey matched command=\(index) keyCode=\(description.keyCode)")
+        guard let index = matcher.consume(description) else {
+            return Unmanaged.passUnretained(event)
+        }
+        superKeyLogger.notice("matcher matched command=\(index) keyCode=\(description.keyCode)")
+        onMatch?(index)
+        superKeyLogger.notice("notification posting command=\(index)")
         NotificationCenter.default.post(name: .yiyiHotkey, object: index)
         return nil
     }

@@ -123,45 +123,52 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertEqual(config.commands.map(\.hotkey), ["super+-", "cmd+shift+-"])
     }
 
-    func testSuperKeyLeaderHeldThenBoundKeyFires() {
+    func testObservedRightCommandFlagsArmAndMinusFires() {
         XCTAssertEqual(superKeyMatches([
-            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
-            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x10)
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x20100000),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x20100000)
         ]), [0])
     }
 
     func testSuperKeyLeaderHeldThenDifferentKeyDoesNotFire() {
         XCTAssertEqual(superKeyMatches([
-            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
-            .init(type: .keyDown, keyCode: 18, deviceFlags: 0x10)
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x100010),
+            .init(type: .keyDown, keyCode: 18, deviceFlags: 0x100010)
         ]), [])
     }
 
-    func testSuperKeyKeyWithoutLeaderDoesNotFire() {
+    func testObservedMinusWithoutLeaderDoesNotFire() {
         XCTAssertEqual(superKeyMatches([
-            .init(type: .keyDown, keyCode: 27, deviceFlags: 0)
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x20000000)
         ]), [])
     }
 
-    func testSuperKeyLeftCommandDoesNotArmRightCommand() {
+    func testObservedLeftCommandDoesNotArmRightCommand() {
         XCTAssertEqual(superKeyMatches([
-            .init(type: .flagsChanged, keyCode: 55, deviceFlags: 0),
-            .init(type: .keyDown, keyCode: 27, deviceFlags: 0)
+            .init(type: .flagsChanged, keyCode: 55, deviceFlags: 0x20100000),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x20100000)
         ]), [])
     }
 
-    func testSuperKeyReleasedThenKeyDoesNotFire() {
+    func testObservedRightCommandReleaseDisarmsLeader() {
         XCTAssertEqual(superKeyMatches([
-            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
-            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0),
-            .init(type: .keyDown, keyCode: 27, deviceFlags: 0)
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x20100000),
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x20000000),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x20000000)
         ]), [])
     }
 
     func testSuperKeyKeyDownWithCommandMaskStillFires() {
         XCTAssertEqual(superKeyMatches([
-            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x10),
-            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x0010_0010)
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x100010),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x100010)
+        ]), [0])
+    }
+
+    func testObservedRightCommandArmsWithEmptyDeviceSpecificPortion() {
+        XCTAssertEqual(superKeyMatches([
+            .init(type: .flagsChanged, keyCode: 54, deviceFlags: 0x20100000),
+            .init(type: .keyDown, keyCode: 27, deviceFlags: 0x20100000)
         ]), [0])
     }
 

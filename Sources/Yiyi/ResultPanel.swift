@@ -1,5 +1,8 @@
 import AppKit
 import YiyiCore
+import OSLog
+
+private let panelLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "panel")
 
 @MainActor enum Theme {
     static let paper = adaptive(light: 0xF7F6F2, dark: 0x171816)
@@ -179,6 +182,7 @@ private final class ThemeFillView: NSView {
         }
         shownAt = Date()
         NSApp.activate(ignoringOtherApps: true); panel.alphaValue = 0; panel.makeKeyAndOrderFront(nil)
+        panelLogger.notice("panel shown frame=\(String(describing: self.panel.frame), privacy: .public) visible=\(self.panel.isVisible) textCharacters=\(self.textView.string.count)")
         NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
         if keyMonitor == nil {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in

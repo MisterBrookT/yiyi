@@ -35,6 +35,15 @@ public enum SuperKey: String, Codable, Sendable, CaseIterable {
         case .rightControl: 0x002000
         }
     }
+
+    public var modifierFlag: UInt64 {
+        switch self {
+        case .none: 0
+        case .rightCommand: 0x100000
+        case .rightOption: 0x080000
+        case .rightControl: 0x040000
+        }
+    }
 }
 
 public enum HotkeyBinding: Equatable, Sendable {
@@ -60,19 +69,22 @@ public struct SuperKeyEvent: Sendable {
 }
 
 public struct SuperKeyMatcher: Sendable {
-    private let leaderFlag: UInt64
+    private let leaderKeyCode: UInt32?
+    private let modifierFlag: UInt64
     private let bindings: [UInt32: Int]
     private var leaderHeld = false
 
     public init(superKey: SuperKey, bindings: [UInt32: Int]) {
-        leaderFlag = superKey.deviceFlag
+        leaderKeyCode = superKey.keyCode.map(UInt32.init)
+        modifierFlag = superKey.modifierFlag
         self.bindings = bindings
     }
 
     public mutating func consume(_ event: SuperKeyEvent) -> Int? {
         switch event.type {
         case .flagsChanged:
-            leaderHeld = leaderFlag != 0 && event.deviceFlags & leaderFlag != 0
+            guard event.keyCode == leaderKeyCode else { return nil }
+            leaderHeld = modifierFlag != 0 && event.deviceFlags & modifierFlag != 0
             return nil
         case .keyDown:
             guard leaderHeld else { return nil }

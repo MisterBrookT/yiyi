@@ -2,6 +2,40 @@ import AppKit
 import Foundation
 import YiyiCore
 
+if CommandLine.arguments.contains("--selftest-superkey") {
+    Task { @MainActor in
+        do {
+            let app = NSApplication.shared
+            app.setActivationPolicy(.prohibited)
+            let manager = ConfigManager()
+            try manager.load()
+            let monitor = SuperKeyMonitor()
+            var dispatched = false
+            monitor.onMatch = { index in
+                dispatched = true
+                print("match command=\(index)")
+                print("dispatch command=\(index)")
+                print("PASS tap callback -> match -> dispatch")
+                fflush(stdout)
+                exit(0)
+            }
+            monitor.configure(superKey: manager.config.superKey, commands: manager.config.commands, trusted: AXIsProcessTrusted())
+            print("tap.created=\(monitor.isCreated) tap.enabled=\(monitor.isEnabled)")
+            guard monitor.isEnabled else { throw NSError(domain: "yiyi.selftest", code: 1, userInfo: [NSLocalizedDescriptionKey: "event tap is not enabled"]) }
+            print("inject flagsChanged keyCode=54 flags=0x100000")
+            monitor.consumeForSelfTest(type: .flagsChanged, keyCode: 54, flags: 0x100000)
+            monitor.consumeForSelfTest(type: .keyDown, keyCode: 27, flags: 0x100000)
+            guard dispatched else {
+                fputs("FAIL no matched command was dispatched\n", stderr)
+                exit(1)
+            }
+        } catch {
+            fputs("yiyi selftest-superkey: \(error.localizedDescription)\n", stderr)
+            exit(1)
+        }
+    }
+    RunLoop.main.run()
+} else
 if CommandLine.arguments.contains("--diagnose") {
     Task { @MainActor in
         do {

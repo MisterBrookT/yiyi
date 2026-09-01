@@ -1,6 +1,9 @@
 import AppKit
 import ServiceManagement
 import YiyiCore
+import OSLog
+
+private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispatch")
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private let configs = ConfigManager(), hotkeys = HotkeyManager(), panel = ResultPanelController()
@@ -33,6 +36,7 @@ import YiyiCore
         statusItem.button?.setAccessibilityLabel("yiyi")
         NotificationCenter.default.addObserver(forName: .yiyiHotkey, object: nil, queue: .main) { [weak self] note in
             let index = note.object as? Int ?? 0
+            appLogger.notice("notification received command=\(index)")
             Task { @MainActor in self?.runCommand(index: index) }
         }
         configs.onChange = { [weak self] in self?.configDidChange() }
@@ -111,6 +115,7 @@ import YiyiCore
     }
 
     private func runCommand(index: Int) {
+        appLogger.notice("runCommand entered command=\(index)")
         guard configs.config.commands.indices.contains(index) else { return }
         let command = configs.config.commands[index]
         // AX trust can change after launch. This observation deliberately happens for every
@@ -119,6 +124,7 @@ import YiyiCore
         startAccessibilityPollingIfNeeded(trusted: accessibility.trusted)
         Task {
             let capture = await SelectionCapture.capture(trusted: accessibility.trusted)
+            appLogger.notice("capture completed source=\(capture.source.rawValue, privacy: .public) hasText=\(capture.text != nil)")
             guard let input = capture.text else {
                 if accessibility.trusted {
                     panel.showError(command: command.name, message: "No selected or clipboard text found")
@@ -143,6 +149,7 @@ import YiyiCore
                 )
                 let prompt = try renderPrompt(command.prompt, input: input)
                 let result = try await OpenAIClient().complete(prompt: prompt, provider: provider, apiKey: key)
+                appLogger.notice("provider completed characters=\(result.count)")
                 lastResult = result
                 if configs.config.autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result, forType: .string) }
                 panel.showResult(result); rebuildMenu()
