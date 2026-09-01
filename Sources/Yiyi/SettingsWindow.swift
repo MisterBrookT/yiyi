@@ -34,6 +34,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     private var paneView: NSView?
     private var selectedProvider: String
     private(set) var selectedPane: Pane
+    private var fieldErrors: [String: String] = [:]
     private var centered = false
     private let contentWidth: CGFloat = 590
     private let labelWidth: CGFloat = 150
@@ -174,9 +175,11 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     private func rebuild(resize: Bool = true, animate: Bool = false) {
         paneView?.removeFromSuperview()
         let document = paneDocument()
+        let documentSize = document.fittingSize
+        document.frame = NSRect(origin: .zero, size: documentSize)
         let scroll = NSScrollView()
         scroll.drawsBackground = false
-        scroll.hasVerticalScroller = document.fittingSize.height > 680
+        scroll.hasVerticalScroller = documentSize.height > 970
         scroll.autohidesScrollers = true
         scroll.documentView = document
         detail.addSubview(scroll)
@@ -184,7 +187,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
         NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: detail.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: detail.trailingAnchor), scroll.topAnchor.constraint(equalTo: detail.topAnchor), scroll.bottomAnchor.constraint(equalTo: detail.bottomAnchor)])
         paneView = scroll
         document.layoutSubtreeIfNeeded()
-        let desiredHeight = min(700, max(330, document.fittingSize.height))
+        let desiredHeight = min(1000, max(330, documentSize.height))
         window?.title = "\(selectedPane.rawValue) — yiyi Settings"
         window?.minSize = NSSize(width: 770, height: desiredHeight)
         if resize { resizeWindow(to: desiredHeight, animate: animate) }
@@ -234,34 +237,39 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
             button.state = name == configs.config.defaultProvider ? .on : .off
             choices.addArrangedSubview(button)
         }
-        guard let provider = configs.config.providers[selectedProvider] else { return section("Provider", rows: [row("Default", choices)]) }
+        let addName = field("", id: "provider.add-name"); prosePlaceholder("New provider name", in: addName)
+        let add = NSButton(title: "Add Provider", target: self, action: #selector(addProvider(_:))); add.setAccessibilityIdentifier("provider.add")
+        let remove = NSButton(title: "Remove Provider", target: self, action: #selector(removeProvider)); remove.setAccessibilityIdentifier("provider.remove")
+        guard let provider = configs.config.providers[selectedProvider] else { return section("Provider", rows: [row("Default", choices), row("New provider", addName), row("", add)]) }
         let selected = popup(names, selected: selectedProvider, id: "provider.selector", action: #selector(showProvider(_:)))
+        let baseURL = field(provider.baseURL, id: "provider.base-url", mono: true)
+        let env = field(provider.apiKeyEnv, id: "provider.api-key-env", mono: true)
         let model = field(provider.model, id: "provider.model", mono: true)
         let key = NSSecureTextField(string: "")
-        style(key); key.placeholderString = provider.apiKey == nil ? "Environment, .env, or apikey file" : "Stored — type to replace"
-        key.identifier = NSUserInterfaceItemIdentifier("provider.key.\(selectedProvider)"); key.setAccessibilityIdentifier("provider.apikey"); key.target = self; key.action = #selector(commitField(_:)); stretch(key)
+        style(key); key.placeholderString = provider.apiKey == nil ? "Environment, .env, or apikey file" : "Stored — empty clears"
+        key.identifier = NSUserInterfaceItemIdentifier("provider.api-key"); key.setAccessibilityIdentifier("provider.api-key"); key.target = self; key.action = #selector(commitField(_:)); stretch(key)
         let temperature = field(provider.temperature.map { String($0) } ?? "", id: "provider.temperature", mono: true); prosePlaceholder("Empty to omit", in: temperature)
-        let effort = popup(ReasoningEffort.allCases.map(\.rawValue), selected: provider.reasoningEffort.rawValue, id: "provider.reasoning", action: #selector(providerEffort(_:))); effort.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
+        let effort = popup(ReasoningEffort.allCases.map(\.rawValue), selected: provider.reasoningEffort.rawValue, id: "provider.reasoning-effort", action: #selector(providerEffort(_:))); effort.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
         let status = label(configs.apiKeyStatus(for: selectedProvider), mono: true, secondary: true); status.maximumNumberOfLines = 0; status.usesSingleLineMode = false; status.lineBreakMode = .byWordWrapping; status.preferredMaxLayoutWidth = controlWidth; status.setAccessibilityIdentifier("provider.key-status"); stretch(status); status.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
         let copy = NSButton(checkboxWithTitle: "Copy translations to the clipboard", target: self, action: #selector(changeAutoCopy(_:))); copy.state = configs.config.autoCopy ? .on : .off; copy.setAccessibilityIdentifier("provider.auto-copy")
-        return sections([section("Provider", rows: [row("Default", choices), row("Edit", selected), row("Model", model), row("API key", key), row("Temperature", temperature), row("Reasoning effort", effort), row("Key status", status)]), section("Output", rows: [row("", copy)])])
+        var providerRows = [row("Default", choices), row("Edit", selected), row("Base URL", baseURL), row("API key env", env), row("Model", model), row("API key", key), row("Temperature", temperature), row("Reasoning effort", effort), row("Key status", status), row("", remove), row("New provider", addName), row("", add)]
+        appendError(for: "provider", to: &providerRows)
+        return sections([section("Provider", rows: providerRows), section("Output", rows: [row("", copy)])])
     }
 
     private func shortcutsPane() -> NSView {
         var sectionsList: [NSView] = []
         for (index, command) in configs.config.commands.enumerated() {
-            let name = field(command.name, id: "command.name.\(index)")
-            let hotkey = HotkeyRecorder(value: command.hotkey); hotkey.onCommit = { [weak self] value in try? self?.configs.setCommand(index, hotkey: value) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
+            let name = field(command.name, id: "command.\(index).name")
+            let hotkey = HotkeyRecorder(value: command.hotkey); hotkey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
             let provider = popup(["inherit"] + configs.config.providers.keys.sorted(), selected: command.provider ?? "inherit", id: "command.\(index).provider", action: #selector(commandProvider(_:))); provider.tag = index
-            let model = field(command.model ?? "", id: "command.model.\(index)", mono: true); prosePlaceholder("Inherit", in: model)
-            let effort = popup(["inherit"] + ReasoningEffort.allCases.map(\.rawValue), selected: command.reasoningEffort?.rawValue ?? "inherit", id: "command.\(index).reasoning", action: #selector(commandEffort(_:))); effort.tag = index
-            let prompt = NSTextView(); prompt.string = command.prompt; prompt.font = .systemFont(ofSize: 13); prompt.textContainerInset = NSSize(width: 8, height: 8); prompt.delegate = self; prompt.identifier = NSUserInterfaceItemIdentifier("prompt.\(index)"); prompt.setAccessibilityIdentifier("command.\(index).prompt")
+            let model = field(command.model ?? "", id: "command.\(index).model", mono: true); prosePlaceholder("Inherit", in: model)
+            let effort = popup(["inherit"] + ReasoningEffort.allCases.map(\.rawValue), selected: command.reasoningEffort?.rawValue ?? "inherit", id: "command.\(index).reasoning-effort", action: #selector(commandEffort(_:))); effort.tag = index
+            let prompt = NSTextView(); prompt.string = command.prompt; prompt.font = .systemFont(ofSize: 13); prompt.textContainerInset = NSSize(width: 8, height: 8); prompt.delegate = self; prompt.identifier = NSUserInterfaceItemIdentifier("command.\(index).prompt"); prompt.setAccessibilityIdentifier("command.\(index).prompt")
             let promptScroll = NSScrollView(); promptScroll.documentView = prompt; promptScroll.hasVerticalScroller = true; promptScroll.borderType = .bezelBorder; promptScroll.heightAnchor.constraint(equalToConstant: 92).isActive = true; stretch(promptScroll)
             let remove = NSButton(title: "Remove Command", target: self, action: #selector(removeCommand(_:))); remove.tag = index; remove.setAccessibilityIdentifier("command.\(index).remove")
             var rows = [row("Name", name), row("Shortcut", hotkey), row("Provider", provider), row("Model override", model), row("Reasoning override", effort), row("Prompt template", promptScroll), row("", remove)]
-            if !command.prompt.contains("{selection}") && !command.prompt.contains("{input}") {
-                let warning = label("Prompt must contain {selection} or {input}."); warning.textColor = .systemRed; warning.setAccessibilityIdentifier("command.\(index).prompt-error"); rows.append(row("", warning))
-            }
+            appendError(for: "command.\(index)", to: &rows)
             sectionsList.append(section(command.name.isEmpty ? "Command \(index + 1)" : command.name, rows: rows))
         }
         let add = NSButton(title: "Add Command", target: self, action: #selector(addCommand)); add.setAccessibilityIdentifier("commands.add")
@@ -283,7 +291,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
         tap.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
         var rows = [row("Leader modifier", leader), row("Tap availability", tap)]
         for (index, command) in configs.config.commands.enumerated() {
-            let binding = HotkeyRecorder(value: command.hotkey, recordsSuperKey: true); binding.onCommit = { [weak self] value in try? self?.configs.setCommand(index, hotkey: value) }; binding.setAccessibilityIdentifier("superkey.command.\(index).binding")
+            let binding = HotkeyRecorder(value: command.hotkey, recordsSuperKey: true); binding.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; binding.setAccessibilityIdentifier("superkey.command.\(index).binding")
             rows.append(row(command.name, binding))
         }
         return section("Superkey", rows: rows)
@@ -313,8 +321,19 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
 
     private func section(_ title: String, rows: [NSView]) -> NSView {
-        let heading = label(title, secondary: true); heading.font = .systemFont(ofSize: 12, weight: .semibold); heading.setAccessibilityIdentifier("section.\(title.lowercased().replacingOccurrences(of: " ", with: "-"))"); heading.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true; heading.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        return column([heading] + rows, spacing: 10)
+        let heading = label("", secondary: true)
+        heading.attributedStringValue = NSAttributedString(string: title.uppercased(), attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: Theme.muted, .kern: 1.1])
+        let slug = title.lowercased().replacingOccurrences(of: " ", with: "-")
+        heading.setAccessibilityIdentifier("section.\(slug)"); heading.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true; heading.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        var grouped: [NSView] = []
+        for (index, value) in rows.enumerated() {
+            if index > 0 { let line = NSBox(); line.boxType = .separator; line.heightAnchor.constraint(equalToConstant: 1).isActive = true; grouped.append(line) }
+            grouped.append(value)
+        }
+        let rowStack = column(grouped, spacing: 9)
+        let panel = SettingsGroupView(); panel.addSubview(rowStack); rowStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([rowStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor), rowStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor), rowStack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12), rowStack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -12), panel.widthAnchor.constraint(equalToConstant: labelWidth + 16 + controlWidth)])
+        return column([heading, panel], spacing: 6)
     }
 
     private func row(_ title: String, _ control: NSView) -> NSView {
@@ -332,7 +351,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
 
     private func column(_ views: [NSView], spacing: CGFloat) -> NSStackView { let stack = NSStackView(views: views); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = spacing; return stack }
-    private func label(_ text: String, mono: Bool = false, secondary: Bool = false) -> NSTextField { let value = NSTextField(wrappingLabelWithString: text); value.font = mono ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .systemFont(ofSize: 13); value.textColor = secondary ? .secondaryLabelColor : .labelColor; return value }
+    private func label(_ text: String, mono: Bool = false, secondary: Bool = false) -> NSTextField { let value = NSTextField(wrappingLabelWithString: text); value.font = mono ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .systemFont(ofSize: 13); value.textColor = secondary ? Theme.muted : Theme.ink; return value }
     private func stretch(_ view: NSView) { view.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true }
     private func field(_ value: String, id: String, mono: Bool = false) -> NSTextField { let field = NSTextField(string: value); style(field); if mono { field.font = .monospacedSystemFont(ofSize: 12, weight: .regular) }; field.identifier = NSUserInterfaceItemIdentifier(id); field.setAccessibilityIdentifier(id); field.target = self; field.action = #selector(commitField(_:)); stretch(field); return field }
     private func style(_ field: NSTextField) { field.font = .systemFont(ofSize: 13); field.isBezeled = true; field.bezelStyle = .roundedBezel }
@@ -345,35 +364,67 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
         ])
     }
 
+    private func appendError(for prefix: String, to rows: inout [NSView]) {
+        for match in fieldErrors.filter({ $0.key == prefix || $0.key.hasPrefix(prefix + ".") }).sorted(by: { $0.key < $1.key }) {
+            let warning = label(match.value); warning.textColor = .systemRed; warning.setAccessibilityIdentifier("\(match.key).error"); stretch(warning)
+            rows.append(row("", warning))
+        }
+    }
+
+    private func reject(_ error: Error, at id: String) {
+        fieldErrors[id] = error.localizedDescription
+        rebuild()
+    }
+
+    private func commitHotkey(_ value: String, index: Int) {
+        do { try configs.setCommand(index, hotkey: value); fieldErrors.removeValue(forKey: "command.\(index).hotkey") }
+        catch { fieldErrors["command.\(index).hotkey"] = error.localizedDescription }
+        rebuild()
+    }
+
     private func configureKeyLoop(in root: NSView) {
         let controls = [sidebar as NSView] + root.allSubviews.filter { ($0 as? NSControl)?.isEnabled == true || $0 is NSTextView }
         for (current, next) in zip(controls, controls.dropFirst() + controls.prefix(1)) { current.nextKeyView = next }
         window?.initialFirstResponder = sidebar
     }
 
-    @objc private func selectProvider(_ sender: NSButton) { guard let name = sender.identifier?.rawValue else { return }; try? configs.setDefaultProvider(name); selectedProvider = name; rebuild() }
+    @objc private func selectProvider(_ sender: NSButton) { guard let name = sender.identifier?.rawValue else { return }; do { try configs.setDefaultProvider(name); selectedProvider = name; fieldErrors.removeValue(forKey: "provider.default") } catch { fieldErrors["provider.default"] = error.localizedDescription }; rebuild() }
     @objc private func showProvider(_ sender: NSPopUpButton) { selectedProvider = sender.titleOfSelectedItem ?? selectedProvider; rebuild() }
-    @objc private func providerEffort(_ sender: NSPopUpButton) { guard let name = sender.identifier?.rawValue, let value = sender.titleOfSelectedItem.flatMap(ReasoningEffort.init(rawValue:)) else { return }; try? configs.setProvider(name, reasoningEffort: value); rebuild() }
-    @objc private func commandProvider(_ sender: NSPopUpButton) { try? configs.setCommand(sender.tag, provider: sender.titleOfSelectedItem == "inherit" ? .some(nil) : .some(sender.titleOfSelectedItem)); rebuild() }
-    @objc private func commandEffort(_ sender: NSPopUpButton) { let raw = sender.titleOfSelectedItem; try? configs.setCommand(sender.tag, reasoningEffort: raw == "inherit" ? .some(nil) : .some(raw.flatMap(ReasoningEffort.init(rawValue:)))); rebuild() }
+    @objc private func providerEffort(_ sender: NSPopUpButton) { guard let name = sender.identifier?.rawValue, let value = sender.titleOfSelectedItem.flatMap(ReasoningEffort.init(rawValue:)) else { return }; do { try configs.setProvider(name, reasoningEffort: value) } catch { reject(error, at: "provider.reasoning-effort"); return }; rebuild() }
+    @objc private func commandProvider(_ sender: NSPopUpButton) { do { try configs.setCommand(sender.tag, provider: sender.titleOfSelectedItem == "inherit" ? .some(nil) : .some(sender.titleOfSelectedItem)) } catch { reject(error, at: "command.\(sender.tag).provider"); return }; rebuild() }
+    @objc private func commandEffort(_ sender: NSPopUpButton) { let raw = sender.titleOfSelectedItem; do { try configs.setCommand(sender.tag, reasoningEffort: raw == "inherit" ? .some(nil) : .some(raw.flatMap(ReasoningEffort.init(rawValue:)))) } catch { reject(error, at: "command.\(sender.tag).reasoning-effort"); return }; rebuild() }
     @objc private func changeSuperKey(_ sender: NSPopUpButton) { guard let selected = sender.titleOfSelectedItem, let value = SuperKey.allCases.first(where: { $0.displayName == selected }) else { return }; try? configs.setSuperKey(value); rebuild() }
     @objc private func changeAutoCopy(_ sender: NSButton) { try? configs.setAutoCopy(sender.state == .on) }
     @objc private func enableAccessibility() { requestAccessibility(); rebuild() }
     @objc private func repairAccessibilityPermission() { repairAccessibility(); rebuild() }
+    @objc private func addProvider(_ sender: NSButton) {
+        guard let name = control(accessibilityID: "provider.add-name") as? NSTextField else { return }
+        do { try configs.addProvider(named: name.stringValue); selectedProvider = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); fieldErrors.removeValue(forKey: "provider.add-name") }
+        catch { reject(error, at: "provider.add-name"); return }
+        rebuild()
+    }
+    @objc private func removeProvider() { do { try configs.deleteProvider(named: selectedProvider); selectedProvider = configs.config.defaultProvider; fieldErrors.removeValue(forKey: "provider.remove") } catch { reject(error, at: "provider.remove"); return }; rebuild() }
     @objc private func addCommand() { try? configs.addCommand(); rebuild() }
     @objc private func removeCommand(_ sender: NSButton) { try? configs.deleteCommand(at: sender.tag); rebuild() }
     @objc private func commitField(_ sender: NSTextField) {
         let id = sender.identifier?.rawValue ?? ""
-        if id == "provider.model" { try? configs.setProvider(selectedProvider, model: sender.stringValue) }
-        else if id == "provider.temperature" { try? configs.setProvider(selectedProvider, temperature: .some(Double(sender.stringValue))) }
-        else {
-            let parts = id.split(separator: ".").map(String.init)
-            if parts.count >= 3, parts[0] == "provider", parts[1] == "key", !sender.stringValue.isEmpty { try? configs.setProvider(parts[2], apiKey: .some(sender.stringValue)) }
-            if parts.count >= 3, parts[0] == "command", let index = Int(parts[2]) {
-                if parts[1] == "name" { try? configs.setCommand(index, name: sender.stringValue) }
-                else if parts[1] == "model" { try? configs.setCommand(index, model: .some(sender.stringValue.isEmpty ? nil : sender.stringValue)) }
+        do {
+            switch id {
+            case "provider.base-url": try configs.setProvider(selectedProvider, baseURL: sender.stringValue)
+            case "provider.add-name": return
+            case "provider.api-key-env": try configs.setProvider(selectedProvider, apiKeyEnv: sender.stringValue)
+            case "provider.model": try configs.setProvider(selectedProvider, model: sender.stringValue)
+            case "provider.api-key": try configs.setProvider(selectedProvider, apiKey: .some(sender.stringValue.isEmpty ? nil : sender.stringValue))
+            case "provider.temperature": try configs.setProvider(selectedProvider, temperature: .some(try validateTemperature(sender.stringValue)))
+            default:
+                let parts = id.split(separator: ".").map(String.init)
+                if parts.count == 3, parts[0] == "command", let index = Int(parts[1]) {
+                    if parts[2] == "name" { try configs.setCommand(index, name: sender.stringValue) }
+                    else if parts[2] == "model" { try configs.setCommand(index, model: .some(sender.stringValue.isEmpty ? nil : sender.stringValue)) }
+                }
             }
-        }
+            fieldErrors.removeValue(forKey: id)
+        } catch { reject(error, at: id); return }
         rebuild()
     }
 
@@ -407,14 +458,19 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     func control(accessibilityID: String) -> NSView? { window?.contentView.flatMap { root in ([root] + root.allSubviews).first { $0.accessibilityIdentifier() == accessibilityID } } }
     func renderPNG(to url: URL, bottom: Bool = false) throws {
         guard let content = window?.contentView else { return }
-        if bottom, let scroll = paneView as? NSScrollView, let document = scroll.documentView { scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.bounds.height - scroll.contentView.bounds.height))); scroll.reflectScrolledClipView(scroll.contentView) }
         content.layoutSubtreeIfNeeded()
+        if bottom, let scroll = paneView as? NSScrollView, let document = scroll.documentView {
+            document.scrollToVisible(NSRect(x: 0, y: max(0, document.bounds.maxY - 1), width: 1, height: 1))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
         guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
         content.cacheDisplay(in: content.bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { return }
         try png.write(to: url)
     }
-    func setRecordedHotkey(_ value: String, index: Int) throws { try configs.setCommand(index, hotkey: value); rebuild() }
+    func commitRecordedHotkey(accessibilityID: String, value: String) {
+        (control(accessibilityID: accessibilityID) as? HotkeyRecorder)?.commitForJourney(value)
+    }
     func renderSidebarPNG(to url: URL, dark: Bool) throws {
         sidebar.tile()
         for row in 0..<Pane.allCases.count {
@@ -466,7 +522,12 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
         }
         return (titles, sidebar.selectedRow)
     }
-    func textDidEndEditing(_ notification: Notification) { guard let text = notification.object as? NSTextView, let id = text.identifier?.rawValue, let index = Int(id.split(separator: ".").last ?? "") else { return }; try? configs.setCommand(index, prompt: text.string); rebuild() }
+    func textDidEndEditing(_ notification: Notification) {
+        guard let text = notification.object as? NSTextView, let id = text.identifier?.rawValue, let index = Int(id.split(separator: ".").dropLast().last ?? "") else { return }
+        do { try configs.setCommand(index, prompt: text.string); fieldErrors.removeValue(forKey: "command.\(index).prompt") }
+        catch { fieldErrors["command.\(index).prompt"] = error.localizedDescription }
+        rebuild()
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool { true }
 }
 private final class SettingsWindow: NSWindow {
@@ -477,15 +538,14 @@ private final class SettingsWindow: NSWindow {
 private final class SettingsDocumentView: NSView {
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
+        Theme.paper.setFill()
         dirtyRect.fill()
     }
 }
 
 private final class SettingsSidebarBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        (dark ? NSColor(calibratedWhite: 0.14, alpha: 1) : NSColor.underPageBackgroundColor).setFill()
+        Theme.surface.setFill()
         dirtyRect.fill()
     }
 }
@@ -496,8 +556,24 @@ private final class SettingsSidebarTableView: NSTableView {
 
 private final class SettingsBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
+        Theme.paper.setFill()
         dirtyRect.fill()
+    }
+}
+
+private final class SettingsGroupView: NSView {
+    override var intrinsicContentSize: NSSize {
+        guard let content = subviews.first else { return .zero }
+        let size = content.fittingSize
+        return NSSize(width: size.width, height: size.height + 24)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.surface.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        Theme.line.setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        border.lineWidth = 1
+        border.stroke()
     }
 }
 
@@ -506,6 +582,31 @@ private final class SettingsBackgroundView: NSView {
     private var recording = false
     private let recordsSuperKey: Bool
     init(value: String, recordsSuperKey: Bool = false) { self.recordsSuperKey = recordsSuperKey; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
+    override var intrinsicContentSize: NSSize {
+        let count = keycapLabels.count
+        return NSSize(width: max(74, CGFloat(count) * 27 + CGFloat(max(0, count - 1)) * 4), height: 26)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        let labels = keycapLabels
+        guard !labels.isEmpty, !recording else { super.draw(dirtyRect); return }
+        var x: CGFloat = 0
+        for value in labels {
+            let width = max(23, (value as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)]).width + 12)
+            let frame = NSRect(x: x, y: 2, width: width, height: 22)
+            Theme.surface.setFill(); NSBezierPath(roundedRect: frame, xRadius: 5, yRadius: 5).fill()
+            Theme.line.setStroke(); let border = NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5); border.stroke()
+            value.draw(in: frame.insetBy(dx: 6, dy: 4), withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium), .foregroundColor: Theme.ink])
+            x += width + 4
+        }
+    }
+    private var keycapLabels: [String] {
+        guard !title.isEmpty, title != "Record Shortcut" else { return [] }
+        return title.split(separator: "+", omittingEmptySubsequences: false).enumerated().compactMap { index, token in
+            let raw = String(token).lowercased()
+            if raw.isEmpty && index > 0 { return "+" }
+            switch raw { case "cmd", "command": return "⌘"; case "shift": return "⇧"; case "ctrl", "control": return "⌃"; case "opt", "option", "alt": return "⌥"; case "super", "hyper": return "◆"; default: return raw.uppercased() }
+        }
+    }
     required init?(coder: NSCoder) { nil }
     @objc private func beginRecording() { recording = true; title = "Press shortcut…"; window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
@@ -524,6 +625,7 @@ private final class SettingsBackgroundView: NSView {
         guard modifiers != 0 else { NSSound.beep(); return }
         let value = formatHotkey(keyCode: UInt32(event.keyCode), modifiers: modifiers); recording = false; title = value; onCommit?(value)
     }
+    func commitForJourney(_ value: String) { onCommit?(value) }
 }
 
 private extension NSView {

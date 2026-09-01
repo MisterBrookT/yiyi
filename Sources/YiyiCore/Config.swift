@@ -189,3 +189,57 @@ public func renderPrompt(_ template: String, input: String) throws -> String {
     guard template.contains("{selection}") || template.contains("{input}") else { throw PromptTemplateError.missingPlaceholder }
     return template.replacingOccurrences(of: "{selection}", with: input).replacingOccurrences(of: "{input}", with: input)
 }
+
+public enum ConfigValidationError: Error, LocalizedError, Equatable {
+    case emptyProviderName
+    case duplicateProvider(String)
+    case defaultProviderCannotBeRemoved(String)
+    case emptyCommandName
+    case duplicateHotkey(String)
+    case invalidHotkey(String)
+    case emptyPrompt
+    case missingPromptPlaceholder
+    case invalidTemperature(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .emptyProviderName: "Provider name cannot be empty."
+        case let .duplicateProvider(name): "A provider named “\(name)” already exists."
+        case let .defaultProviderCannotBeRemoved(name): "“\(name)” is the default provider. Choose another default before removing it."
+        case .emptyCommandName: "Command name cannot be empty."
+        case let .duplicateHotkey(value): "The shortcut “\(value)” is already used by another command."
+        case let .invalidHotkey(value): "“\(value)” is not a valid shortcut."
+        case .emptyPrompt: "Prompt cannot be empty."
+        case .missingPromptPlaceholder: "Prompt must contain {selection} or {input}."
+        case let .invalidTemperature(value): "“\(value)” is not a number."
+        }
+    }
+}
+
+public func validateProviderName(_ name: String, existing: Set<String>) throws -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { throw ConfigValidationError.emptyProviderName }
+    guard !existing.contains(trimmed) else { throw ConfigValidationError.duplicateProvider(trimmed) }
+    return trimmed
+}
+
+public func validateTemperature(_ value: String) throws -> Double? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    guard let result = Double(trimmed) else { throw ConfigValidationError.invalidTemperature(value) }
+    return result
+}
+
+public func validateCommand(name: String? = nil, hotkey: String? = nil, prompt: String? = nil, commands: [CommandConfig], excluding index: Int) throws {
+    if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ConfigValidationError.emptyCommandName }
+    if let hotkey {
+        do { _ = try parseBinding(hotkey) } catch { throw ConfigValidationError.invalidHotkey(hotkey) }
+        if commands.enumerated().contains(where: { $0.offset != index && $0.element.hotkey.lowercased() == hotkey.lowercased() }) {
+            throw ConfigValidationError.duplicateHotkey(hotkey)
+        }
+    }
+    if let prompt {
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ConfigValidationError.emptyPrompt }
+        guard prompt.contains("{selection}") || prompt.contains("{input}") else { throw ConfigValidationError.missingPromptPlaceholder }
+    }
+}

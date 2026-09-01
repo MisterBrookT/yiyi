@@ -30,18 +30,45 @@ import YiyiCore
         onChange?()
     }
 
-    func setDefaultProvider(_ name: String) throws { try update { $0.defaultProvider = name } }
-    func setProvider(_ name: String, model: String? = nil, apiKey: String?? = nil, temperature: Double?? = nil, reasoningEffort: ReasoningEffort? = nil) throws {
+    func setDefaultProvider(_ name: String) throws {
+        guard config.providers[name] != nil else { throw ProviderResolutionError.unknownProvider(name) }
+        try update { $0.defaultProvider = name }
+    }
+    func setProvider(
+        _ name: String,
+        baseURL: String? = nil,
+        model: String? = nil,
+        apiKeyEnv: String? = nil,
+        apiKey: String?? = nil,
+        temperature: Double?? = nil,
+        reasoningEffort: ReasoningEffort? = nil
+    ) throws {
         try update {
             guard var provider = $0.providers[name] else { return }
+            if let baseURL { provider.baseURL = baseURL }
             if let model { provider.model = model }
+            if let apiKeyEnv { provider.apiKeyEnv = apiKeyEnv }
             if let apiKey { provider.apiKey = apiKey }
             if let temperature { provider.temperature = temperature }
             if let reasoningEffort { provider.reasoningEffort = reasoningEffort }
             $0.providers[name] = provider
         }
     }
+    func addProvider(named rawName: String) throws {
+        let name = try validateProviderName(rawName, existing: Set(config.providers.keys))
+        try update {
+            $0.providers[name] = ProviderConfig(baseURL: "https://api.example.com/v1", model: "model", apiKeyEnv: "\(name.uppercased().replacingOccurrences(of: "-", with: "_"))_API_KEY")
+        }
+    }
+    func deleteProvider(named name: String) throws {
+        guard name != config.defaultProvider else { throw ConfigValidationError.defaultProviderCannotBeRemoved(name) }
+        try update {
+            $0.providers.removeValue(forKey: name)
+            for index in $0.commands.indices where $0.commands[index].provider == name { $0.commands[index].provider = nil }
+        }
+    }
     func setCommand(_ index: Int, name: String? = nil, prompt: String? = nil, hotkey: String? = nil, provider: String?? = nil, model: String?? = nil, reasoningEffort: ReasoningEffort?? = nil) throws {
+        try validateCommand(name: name, hotkey: hotkey, prompt: prompt, commands: config.commands, excluding: index)
         try update {
             guard $0.commands.indices.contains(index) else { return }
             if let name { $0.commands[index].name = name }
@@ -53,7 +80,7 @@ import YiyiCore
         }
     }
     func addCommand() throws {
-        try update { $0.commands.append(CommandConfig(name: "New command", hotkey: "", prompt: "Translate the following text:\n\n{selection}")) }
+        try update { $0.commands.append(CommandConfig(name: "New command", hotkey: "cmd+shift+0", prompt: "Translate the following text:\n\n{selection}")) }
     }
     func deleteCommand(at index: Int) throws { try update { if $0.commands.indices.contains(index) { $0.commands.remove(at: index) } } }
     func setSuperKey(_ value: SuperKey) throws { try update { $0.superKey = value } }

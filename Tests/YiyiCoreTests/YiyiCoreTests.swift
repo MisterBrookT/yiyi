@@ -474,4 +474,31 @@ final class YiyiCoreTests: XCTestCase {
             XCTAssertEqual($0 as? OpenAIError, .emptyResponse)
         }
     }
+
+    func testSettingsValidationRejectsInvalidValues() throws {
+        XCTAssertEqual(try validateTemperature(""), nil)
+        XCTAssertEqual(try validateTemperature("0.7"), 0.7)
+        XCTAssertThrowsError(try validateTemperature("warm")) {
+            XCTAssertEqual($0 as? ConfigValidationError, .invalidTemperature("warm"))
+        }
+        XCTAssertThrowsError(try validateProviderName("deepseek", existing: ["deepseek"])) {
+            XCTAssertEqual($0 as? ConfigValidationError, .duplicateProvider("deepseek"))
+        }
+        let commands = [
+            CommandConfig(name: "One", hotkey: "cmd+1", prompt: "{input}"),
+            CommandConfig(name: "Two", hotkey: "cmd+2", prompt: "{selection}")
+        ]
+        XCTAssertThrowsError(try validateCommand(hotkey: "cmd+2", commands: commands, excluding: 0)) {
+            XCTAssertEqual($0 as? ConfigValidationError, .duplicateHotkey("cmd+2"))
+        }
+        XCTAssertThrowsError(try validateCommand(hotkey: "nonsense+key", commands: commands, excluding: 0)) {
+            XCTAssertEqual($0 as? ConfigValidationError, .invalidHotkey("nonsense+key"))
+        }
+        XCTAssertThrowsError(try validateCommand(prompt: "", commands: commands, excluding: 0)) {
+            XCTAssertEqual($0 as? ConfigValidationError, .emptyPrompt)
+        }
+        XCTAssertThrowsError(try validateCommand(prompt: "plain text", commands: commands, excluding: 0)) {
+            XCTAssertEqual($0 as? ConfigValidationError, .missingPromptPlaceholder)
+        }
+    }
 }

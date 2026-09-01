@@ -5,13 +5,13 @@ import OSLog
 private let panelLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "panel")
 
 @MainActor enum Theme {
-    static let paper = adaptive(light: 0xF7F6F2, dark: 0x171816)
-    static let surface = adaptive(light: 0xEFEEE9, dark: 0x22231F)
-    static let ink = adaptive(light: 0x171816, dark: 0xF7F6F2)
-    static let muted = adaptive(light: 0x6F716C, dark: 0xA8AAA4)
-    static let line = adaptive(light: 0xD7D6D0, dark: 0x393A36)
-    static let active = adaptive(light: 0x2F6F50, dark: 0x68A884)
-    static let attention = adaptive(light: 0x9A5B24, dark: 0xC98A4F)
+    static let paper = adaptive(light: 0xFCFCFC, dark: 0x181818)
+    static let surface = adaptive(light: 0xF2F2F2, dark: 0x242424)
+    static let ink = adaptive(light: 0x171717, dark: 0xF5F5F5)
+    static let muted = adaptive(light: 0x707070, dark: 0xAAAAAA)
+    static let line = adaptive(light: 0xD8D8D8, dark: 0x3A3A3A)
+    static let active = NSColor.controlAccentColor
+    static let attention = adaptive(light: 0xB25E09, dark: 0xD98C3A)
     static let danger = adaptive(light: 0x9B3A34, dark: 0xE07870)
     static let radiusWindow: CGFloat = 22
     static let radiusControl: CGFloat = 8
