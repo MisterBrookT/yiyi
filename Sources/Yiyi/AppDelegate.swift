@@ -11,7 +11,8 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         configs: configs,
         accessibilityStatus: { [weak self] in self?.accessibilityStatus() ?? AccessibilityStatus(trusted: false, superKeyTapStatus: "unknown", signatureIdentity: "unavailable", advice: .awaitGrant) },
         requestAccessibility: { [weak self] in self?.openAccessibilitySettings() },
-        repairAccessibility: { [weak self] in self?.repairAccessibilityPermission() }
+        repairAccessibility: { [weak self] in self?.repairAccessibilityPermission() },
+        reloadFromDisk: { [weak self] in self?.reloadConfig(showErrors: true) }
     )
     private var statusItem: NSStatusItem!
     private var lastResult: String?
@@ -63,11 +64,9 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         }
         let providerParent = NSMenuItem(title: "Provider", action: nil, keyEquivalent: ""); providerParent.submenu = providers; menu.addItem(providerParent)
         menu.addItem(.separator())
-        add("Settings…", action: #selector(openSettings), key: ",", to: menu)
-        add("Edit config…", action: #selector(editConfig), to: menu)
-        add("Reload config", action: #selector(reload), to: menu)
         let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
-        add("Relaunch yiyi", action: #selector(relaunch), to: menu)
+        menu.addItem(.separator())
+        add("Settings…", action: #selector(openSettings), key: ",", to: menu)
         let login = add("Launch at login", action: #selector(toggleLogin(_:)), to: menu); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         let accessibility = AccessibilityState.observe()
         if accessibility.advice == .repairStaleGrant {
@@ -77,7 +76,14 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
             let item = add("Enable Accessibility…", action: #selector(openAccessibilitySettings), to: menu)
             item.toolTip = accessibilityHint
         }
-        menu.addItem(.separator()); add("Quit", action: #selector(NSApplication.terminate(_:)), key: "q", to: menu)
+        if !accessibility.trusted || accessibility.advice == .repairStaleGrant {
+            // Only the permission dance needs a manual relaunch; a working app never asks.
+            add("Relaunch yiyi", action: #selector(relaunch), to: menu)
+        }
+        menu.addItem(.separator())
+        // Quit must target NSApp: this delegate does not respond to terminate: and AppKit
+        // disables any item whose target cannot perform its action.
+        add("Quit", action: #selector(NSApplication.terminate(_:)), key: "q", to: menu).target = NSApp
         statusItem.menu = menu
     }
 
@@ -86,8 +92,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
     }
     @objc private func translateNow() { runCommand(index: 0) }
     @objc private func runMenuCommand(_ sender: NSMenuItem) { runCommand(index: sender.tag) }
-    @objc private func reload() { reloadConfig(showErrors: true) }
-    @objc private func editConfig() { NSWorkspace.shared.open(configs.fileURL) }
     @objc private func openSettings() { settings.show() }
     @objc private func copyLast() {
         if let lastResult {
@@ -150,8 +154,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 panel.showLoading(
                     command: command.name,
                     capture: capture,
-                    provider: provider.name,
-                    model: provider.model,
                     relaunch: accessibility.trusted ? nil : { [weak self] in self?.relaunch() }
                 )
                 let prompt = try renderPrompt(command.prompt, input: input)

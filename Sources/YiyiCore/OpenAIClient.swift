@@ -2,8 +2,10 @@ import Foundation
 
 public struct ChatCompletionResponse: Decodable, Sendable {
     public struct Choice: Decodable, Sendable {
-        public struct Message: Decodable, Sendable { public let content: String }
+        public struct Message: Decodable, Sendable { public let content: String? }
         public let message: Message
+        public let finishReason: String?
+        enum CodingKeys: String, CodingKey { case message, finishReason = "finish_reason" }
     }
     public let choices: [Choice]
 }
@@ -14,12 +16,13 @@ public struct ProviderErrorPayload: Decodable, Sendable {
 }
 
 public enum OpenAIError: Error, LocalizedError, Equatable {
-    case invalidURL, invalidResponse, emptyResponse, http(Int, String), provider(String)
+    case invalidURL, invalidResponse, emptyResponse, truncated, http(Int, String), provider(String)
     public var errorDescription: String? {
         switch self {
         case .invalidURL: "Invalid provider URL"
         case .invalidResponse: "Invalid response from provider"
         case .emptyResponse: "Provider returned no text"
+        case .truncated: "Provider hit the token limit before answering; lower reasoning effort or shorten the selection"
         case let .http(status, body): "HTTP \(status): \(body)"
         case let .provider(message): message
         }
@@ -29,7 +32,10 @@ public enum OpenAIError: Error, LocalizedError, Equatable {
 public func parseChatCompletion(_ data: Data) throws -> String {
     if let payload = try? JSONDecoder().decode(ProviderErrorPayload.self, from: data) { throw OpenAIError.provider(payload.error.message) }
     let response = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-    guard let text = response.choices.first?.message.content, !text.isEmpty else { throw OpenAIError.emptyResponse }
+    guard let choice = response.choices.first else { throw OpenAIError.emptyResponse }
+    guard let text = choice.message.content, !text.isEmpty else {
+        throw choice.finishReason == "length" ? OpenAIError.truncated : OpenAIError.emptyResponse
+    }
     return text
 }
 
@@ -37,13 +43,11 @@ public func buildChatCompletionBody(prompt: String, provider: ResolvedProvider) 
     var body: [String: Any] = [
         "model": provider.model,
         "messages": [["role": "user", "content": prompt]],
-        "max_tokens": 1024
+        "max_tokens": 4096,
+        "reasoning_effort": provider.reasoningEffort.rawValue
     ]
     if let temperature = provider.temperature {
         body["temperature"] = temperature
-    }
-    if provider.reasoningEffort != .none {
-        body["reasoning_effort"] = provider.reasoningEffort.rawValue
     }
     return try JSONSerialization.data(withJSONObject: body)
 }

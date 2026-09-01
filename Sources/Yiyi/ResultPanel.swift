@@ -97,17 +97,12 @@ private final class ThemeFillView: NSView {
         panel.contentView = background
     }
 
-    func showLoading(command: String, source: String, provider: String, model: String) {
-        showLoading(
-            command: command,
-            capture: CaptureDecision(text: source, source: .selection),
-            provider: provider,
-            model: model
-        )
+    func showLoading(command: String, source: String) {
+        showLoading(command: command, capture: CaptureDecision(text: source, source: .selection))
     }
 
-    func showLoading(command: String, capture: CaptureDecision, provider: String, model: String, relaunch: (() -> Void)? = nil) {
-        configure(command: command, capture: capture, provider: provider, model: model)
+    func showLoading(command: String, capture: CaptureDecision, relaunch: (() -> Void)? = nil) {
+        configure(command: command, capture: capture)
         confirm = relaunch
         hintsLabel.stringValue = relaunch == nil ? "esc close   ⌘c copy" : "⏎ relaunch yiyi   esc close"
         statusLabel.stringValue = "working"; statusLabel.textColor = Theme.active; textView.string = ""; resizeAndShow()
@@ -118,7 +113,8 @@ private final class ThemeFillView: NSView {
     }
 
     func showError(command: String = "yiyi", provider: String = "", model: String = "", message: String, detail: String? = nil) {
-        configure(command: command, capture: nil, provider: provider, model: model)
+        configure(command: command, capture: nil)
+        providerLabel.stringValue = [provider, model].filter { !$0.isEmpty }.joined(separator: "/")
         statusLabel.stringValue = "failed"; statusLabel.textColor = Theme.danger
         let value = detail.map { "\(message)\n\n\($0)" } ?? message
         setBody(value, color: Theme.danger, font: .systemFont(ofSize: 15)); resizeAndShow()
@@ -126,32 +122,23 @@ private final class ThemeFillView: NSView {
 
     /// Quiet, non-blocking stand-in for a modal dialog: same panel, Return runs `confirm`.
     func showNotice(command: String, message: String, hints: String, confirm: (() -> Void)?) {
-        configure(command: command, capture: nil, provider: "", model: "")
+        configure(command: command, capture: nil)
         statusLabel.stringValue = ""; self.confirm = confirm; hintsLabel.stringValue = hints
         setBody(message, color: Theme.ink, font: .systemFont(ofSize: 15)); resizeAndShow()
     }
 
-    private func configure(command: String, capture: CaptureDecision?, provider: String, model: String) {
+    private func configure(command: String, capture: CaptureDecision?) {
         commandLabel.stringValue = command.uppercased()
-        if let capture {
-            let source = capture.source.rawValue
-            let text = capture.text?.replacingOccurrences(of: "\n", with: " ") ?? ""
+        if let capture, let text = capture.text, !text.isEmpty {
             let suffix = capture.hint.map { " · \($0)" } ?? ""
-            let value = NSMutableAttributedString(
-                string: source,
-                attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium), .foregroundColor: Theme.muted]
-            )
-            value.append(NSAttributedString(
-                string: "  \(text)\(suffix)",
-                attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Theme.muted]
-            ))
-            sourceLabel.attributedStringValue = value
+            sourceLabel.stringValue = text.replacingOccurrences(of: "\n", with: " ") + suffix
             sourceLabel.isHidden = false
         } else {
             sourceLabel.stringValue = ""
             sourceLabel.isHidden = true
         }
-        providerLabel.stringValue = [provider, model].filter { !$0.isEmpty }.joined(separator: "/")
+        // Provider and model are diagnostics: only worth the pixels when a request fails.
+        providerLabel.stringValue = ""
     }
     private func setBody(_ text: String, color: NSColor, font: NSFont) {
         let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 7.5
@@ -197,6 +184,15 @@ private final class ThemeFillView: NSView {
 
     private func dismiss() { confirm = nil; hintsLabel.stringValue = "esc close   ⌘c copy"; panel.orderOut(nil) }
     private func copyResult() { guard !textView.string.isEmpty else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(textView.string, forType: .string) }
+    /// Same cacheDisplay path the settings journey uses, so panel chrome can be reviewed as an image.
+    func renderPNG(to url: URL) throws {
+        guard let content = panel.contentView else { return }
+        content.layoutSubtreeIfNeeded()
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+        content.cacheDisplay(in: content.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        try png.write(to: url)
+    }
     /// Activation is asynchronous: the panel briefly becomes key and resigns again before the
     /// app is frontmost, which used to hide it instantly. Ignore resign inside that window.
     func windowDidResignKey(_ notification: Notification) {

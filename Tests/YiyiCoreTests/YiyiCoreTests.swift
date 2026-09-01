@@ -447,7 +447,7 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertEqual(body["reasoning_effort"] as? String, "high")
     }
 
-    func testChatCompletionBodyOmitsUnsetTunableParameters() throws {
+    func testChatCompletionBodyDisablesThinkingByDefault() throws {
         let provider = ResolvedProvider(
             name: "test",
             baseURL: "https://example/v1",
@@ -459,7 +459,7 @@ final class YiyiCoreTests: XCTestCase {
                 as? [String: Any]
         )
         XCTAssertNil(body["temperature"])
-        XCTAssertNil(body["reasoning_effort"])
+        XCTAssertEqual(body["reasoning_effort"] as? String, "none")
     }
 
     func testResponseAndErrorPayloadParsing() throws {
@@ -472,6 +472,11 @@ final class YiyiCoreTests: XCTestCase {
         }
         XCTAssertThrowsError(try parseChatCompletion(Data(#"{"choices":[]}"#.utf8))) {
             XCTAssertEqual($0 as? OpenAIError, .emptyResponse)
+        }
+        XCTAssertThrowsError(
+            try parseChatCompletion(Data(#"{"choices":[{"message":{"content":""},"finish_reason":"length"}]}"#.utf8))
+        ) {
+            XCTAssertEqual($0 as? OpenAIError, .truncated)
         }
     }
 

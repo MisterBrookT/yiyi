@@ -60,11 +60,11 @@ synthetic `System Events` keystrokes do not reach them.
 
 ## Settings and configuration
 
-Choose **Settings…** from the menu (or press <kbd>⌘</kbd><kbd>,</kbd>) to open a native, four-pane settings window. Its source-list sidebar separates **Provider**, **Shortcuts**, **Superkey**, and **Permissions**, remembers the last pane, and sizes the window to the selected pane. Changes are saved immediately.
+Choose **Settings…** from the menu (or press <kbd>⌘</kbd><kbd>,</kbd>) to open one native page: no sidebar, no pane switching. It sizes itself to its content and scrolls only when the display is too short for the whole page. Changes are saved immediately.
 
-**Provider** selects the default service and edits its model, API key, optional temperature, reasoning effort, key-resolution status, and automatic copying. **Shortcuts** provides each command's hotkey recorder, provider/model/reasoning overrides, validated prompt template, and add/remove controls. **Superkey** contains the leader modifier, command bindings, and tap availability. **Permissions** reports Accessibility trust and the signing identity, explains stale grants, and offers the user-initiated enable action.
+The page shows only what a first run needs and hides the rest behind **Advanced** disclosures that start collapsed. **Service** picks the service, takes its API key, and says whether that key resolves; Advanced adds the edited provider, base URL, key environment variable, model, temperature, reasoning effort, key source, and add/remove provider. **Shortcuts** holds the leader key, then one group per command with its name, hotkey recorder, and validated prompt template; each command's Advanced adds its service, model, and reasoning overrides plus its remove control. **System** covers automatic copying and Accessibility trust, including stale-grant repair; Advanced adds leader-key tap availability, the signing identity, and the config-file escape hatch (**Edit config file…** and **Reload from file**).
 
-The off-screen UI journey produces light- and dark-appearance screenshots of every pane alongside its semantic and geometry assertions. It renders the real AppKit view tree without activating the app or capturing the desktop.
+The off-screen UI journey produces light- and dark-appearance screenshots of the page alongside its semantic and geometry assertions. It renders the real AppKit view tree without activating the app or capturing the desktop.
 
 On first launch yiyi creates `~/.config/yiyi/config.json` with these exact defaults:
 
@@ -104,11 +104,11 @@ On first launch yiyi creates `~/.config/yiyi/config.json` with these exact defau
 
 A command's optional `provider`, `model`, and `reasoningEffort` override the selected default. Every prompt must contain `{selection}` or `{input}`. Standard hotkeys accept `cmd`, `shift`, `ctrl`, and `opt` plus a key, such as `ctrl+opt+t`.
 
-The **Superkey** setting can turn Right Command, Right Option, or Right Control into a leader key. Bind commands with syntax such as `super+t`; while the leader is held, yiyi consumes that bound key instead of passing it to the frontmost app. Superkey bindings require yiyi to be enabled in **Privacy & Security → Accessibility**. If access is unavailable, the Settings status explains why and normal Carbon shortcuts and clipboard-only translation keep working.
+The **Leader key** setting can turn Right Command, Right Option, or Right Control into a leader key. Bind commands with syntax such as `super+t`; while the leader is held, yiyi consumes that bound key instead of passing it to the frontmost app. Superkey bindings require yiyi to be enabled in **Privacy & Security → Accessibility**. If access is unavailable, the Advanced tap-availability status in **System** explains why and normal Carbon shortcuts and clipboard-only translation keep working.
 
-**Edit config…** opens the underlying file; **Reload config** applies external changes. Existing custom providers remain supported when loaded, although the shipped provider set is DeepSeek and Qwen.
+The status-item menu stays short: translate, pick a provider, copy the last result, open Settings, and toggle launch at login. Permission repair and relaunch appear only while Accessibility is missing or stale. Hand-editing the config file lives in **System → Advanced**; existing custom providers remain supported when loaded, although the shipped provider set is DeepSeek and Qwen.
 
-Provider key lookup order is `providers.<name>.apiKey`, its `apiKeyEnv` process environment variable, the same variable in `~/.config/yiyi/.env`, then `~/.config/yiyi/apikey` for the default provider only. Keys are never displayed or logged. An empty temperature omits `temperature` from requests; reasoning effort `none` omits `reasoning_effort`.
+Provider key lookup order is `providers.<name>.apiKey`, its `apiKeyEnv` process environment variable, the same variable in `~/.config/yiyi/.env`, then `~/.config/yiyi/apikey` for the default provider only. Keys are never displayed or logged. An empty temperature omits `temperature` from requests; reasoning effort `none` is sent as `reasoning_effort: "none"`, which disables thinking on providers that reason by default (DeepSeek V4 thinks at `high` unless told otherwise).
 
 ## Providers
 
