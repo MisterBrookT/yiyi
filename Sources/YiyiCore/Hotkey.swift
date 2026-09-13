@@ -7,20 +7,21 @@ public struct ParsedHotkey: Equatable, Sendable {
 }
 
 public enum SuperKey: String, Codable, Sendable, CaseIterable {
-    case none, rightCommand, rightOption, rightControl
+    case none, rightCommand, rightOption, rightControl, externalHyper
 
     public var displayName: String {
         switch self {
-        case .none: "off"
-        case .rightCommand: "right ⌘"
-        case .rightOption: "right ⌥"
-        case .rightControl: "right ⌃"
+        case .none: "Off"
+        case .rightCommand: "Right Command"
+        case .rightOption: "Right Option"
+        case .rightControl: "Right Control"
+        case .externalHyper: "External Hyper (⌃⌥⇧⌘)"
         }
     }
 
     public var keyCode: UInt16? {
         switch self {
-        case .none: nil
+        case .none, .externalHyper: nil
         case .rightCommand: 54
         case .rightOption: 61
         case .rightControl: 62
@@ -29,7 +30,7 @@ public enum SuperKey: String, Codable, Sendable, CaseIterable {
 
     public var deviceFlag: UInt64 {
         switch self {
-        case .none: 0
+        case .none, .externalHyper: 0
         case .rightCommand: 0x000010
         case .rightOption: 0x000040
         case .rightControl: 0x002000
@@ -38,7 +39,7 @@ public enum SuperKey: String, Codable, Sendable, CaseIterable {
 
     public var modifierFlag: UInt64 {
         switch self {
-        case .none: 0
+        case .none, .externalHyper: 0
         case .rightCommand: 0x100000
         case .rightOption: 0x080000
         case .rightControl: 0x040000
@@ -150,9 +151,13 @@ public func parseBinding(_ value: String) throws -> HotkeyBinding {
 
 public func effectiveBinding(_ value: String, superKey: SuperKey) throws -> HotkeyBinding {
     let binding = try parseBinding(value)
-    guard superKey != .none,
+    let hyperModifiers = HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control
+    if superKey == .externalHyper, case let .superKey(keyCode) = binding {
+        return .carbon(ParsedHotkey(keyCode: keyCode, modifiers: hyperModifiers))
+    }
+    guard superKey != .none, superKey != .externalHyper,
           case let .carbon(parsed) = binding,
-          parsed.modifiers == (HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control)
+          parsed.modifiers == hyperModifiers
     else { return binding }
     return .superKey(keyCode: parsed.keyCode)
 }
@@ -163,7 +168,7 @@ public func formatSuperKeyBinding(keyCode: UInt32) -> String? {
 
 @discardableResult
 public func migrateLegacySuperKeyBindings(in config: inout YiyiConfig) -> Bool {
-    guard config.superKey != .none else { return false }
+    guard config.superKey != .none, config.superKey != .externalHyper else { return false }
     let legacyModifiers = HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control
     var changed = false
     for index in config.commands.indices {

@@ -52,25 +52,26 @@ let tile = CGRect(x: inset, y: inset, width: side - inset * 2, height: side - in
 
 context.clear(CGRect(x: 0, y: 0, width: side, height: side))
 
-context.addPath(CGPath(
-    roundedRect: tile,
-    cornerWidth: radius,
-    cornerHeight: radius,
-    transform: nil
-))
-context.setFillColor(color(0.145, 0.165, 0.188))
+let tilePath = CGPath(roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil)
+// A restrained enamel finish. Small sizes use the same silhouette without fine detail.
+context.saveGState()
+if !small { context.setShadow(offset: CGSize(width: 0, height: -side * 0.008), blur: side * 0.022, color: color(0, 0.04, 0.10, 0.24)) }
+context.addPath(tilePath)
+context.setFillColor(color(0.12, 0.21, 0.34))
 context.fillPath()
+context.restoreGState()
+
+context.saveGState()
+context.addPath(tilePath); context.clip()
+let finish = CGGradient(colorsSpace: colorSpace, colors: [color(0.12, 0.21, 0.34), color(0.26, 0.39, 0.55)] as CFArray, locations: [0, 1])!
+context.drawLinearGradient(finish, start: CGPoint(x: tile.midX, y: tile.minY), end: CGPoint(x: tile.midX, y: tile.maxY), options: [])
+context.restoreGState()
 
 if !small {
     context.saveGState()
-    context.addPath(CGPath(
-        roundedRect: tile.insetBy(dx: side * 0.012, dy: side * 0.012),
-        cornerWidth: radius - side * 0.012,
-        cornerHeight: radius - side * 0.012,
-        transform: nil
-    ))
-    context.setStrokeColor(color(0.92, 0.91, 0.87, 0.10))
-    context.setLineWidth(side * 0.006)
+    context.addPath(CGPath(roundedRect: tile.insetBy(dx: side * 0.002, dy: side * 0.002), cornerWidth: radius, cornerHeight: radius, transform: nil))
+    context.setStrokeColor(color(0.90, 0.95, 1, 0.30))
+    context.setLineWidth(side * 0.003)
     context.strokePath()
     context.restoreGState()
 }
@@ -115,9 +116,10 @@ let textPosition = CGPoint(
     y: inkOrigin.y - ink.origin.y
 )
 
-context.setFillColor(color(0.95, 0.94, 0.90))
+context.setFillColor(color(0.97, 0.985, 1))
+if !small { context.setShadow(offset: CGSize(width: 0, height: -side * 0.003), blur: side * 0.005, color: color(0.02, 0.07, 0.14, 0.25)) }
 if small {
-    context.setStrokeColor(color(0.95, 0.94, 0.90))
+    context.setStrokeColor(color(0.97, 0.985, 1))
     context.setLineWidth(max(0.3, side * 0.014))
     context.setTextDrawingMode(.fillStroke)
 }

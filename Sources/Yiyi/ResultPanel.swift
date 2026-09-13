@@ -7,6 +7,9 @@ private let panelLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "pane
 @MainActor enum Theme {
     static let paper = adaptive(light: 0xFCFCFC, dark: 0x181818)
     static let surface = adaptive(light: 0xF2F2F2, dark: 0x242424)
+    static let settingsBackground = adaptive(light: 0xF5F5F7, dark: 0x202023)
+    static let settingsSurface = adaptive(light: 0xFFFFFF, dark: 0x29292C)
+    static let settingsBorder = adaptive(light: 0xE0E0E3, dark: 0x3C3C40)
     static let ink = adaptive(light: 0x171717, dark: 0xF5F5F5)
     static let muted = adaptive(light: 0x707070, dark: 0xAAAAAA)
     static let line = adaptive(light: 0xD8D8D8, dark: 0x3A3A3A)

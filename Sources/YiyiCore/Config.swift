@@ -4,6 +4,21 @@ public enum ReasoningEffort: String, Codable, Sendable, CaseIterable {
     case none, minimal, low, medium, high
 }
 
+public enum ProviderGroup: String, CaseIterable, Sendable {
+    case deepseek = "DeepSeek"
+    case qwen = "Qwen"
+    case openAICompatible = "OpenAI-compatible"
+}
+
+/// Built-in services retain their own groups; every user-defined endpoint uses the shared protocol group.
+public func providerGroup(for name: String) -> ProviderGroup {
+    switch name {
+    case "deepseek": .deepseek
+    case "qwen": .qwen
+    default: .openAICompatible
+    }
+}
+
 public struct ProviderConfig: Codable, Equatable, Sendable {
     public var baseURL: String
     public var model: String
@@ -82,11 +97,20 @@ public struct CommandConfig: Codable, Equatable, Sendable {
     }
 }
 
+public func makeNewCommand(existing: [CommandConfig]) -> CommandConfig {
+    let names = Set(existing.map(\.name))
+    var name = "New command"
+    var suffix = 2
+    while names.contains(name) { name = "New command \(suffix)"; suffix += 1 }
+    return CommandConfig(name: name, hotkey: "", prompt: "Translate the following text:\n\n{selection}")
+}
+
 public struct YiyiConfig: Codable, Equatable, Sendable {
     public var defaultProvider: String
     public var providers: [String: ProviderConfig]
     public var autoCopy: Bool
     public var superKey: SuperKey
+    public var pointerTrigger: PointerTriggerConfig
     public var commands: [CommandConfig]
 
     public static let defaultProviders: [String: ProviderConfig] = [
@@ -103,17 +127,19 @@ public struct YiyiConfig: Codable, Equatable, Sendable {
         providers: [String: ProviderConfig] = defaultProviders,
         autoCopy: Bool = true,
         superKey: SuperKey = .none,
+        pointerTrigger: PointerTriggerConfig = .init(),
         commands: [CommandConfig] = defaultCommands
     ) {
         self.defaultProvider = defaultProvider
         self.providers = providers
         self.autoCopy = autoCopy
         self.superKey = superKey
+        self.pointerTrigger = pointerTrigger
         self.commands = commands
     }
 
     enum CodingKeys: String, CodingKey {
-        case defaultProvider, providers, autoCopy, superKey, commands
+        case defaultProvider, providers, autoCopy, superKey, pointerTrigger, commands
     }
 
     public init(from decoder: Decoder) throws {
@@ -122,8 +148,21 @@ public struct YiyiConfig: Codable, Equatable, Sendable {
         providers = try c.decodeIfPresent([String: ProviderConfig].self, forKey: .providers) ?? Self.defaultProviders
         autoCopy = try c.decodeIfPresent(Bool.self, forKey: .autoCopy) ?? true
         superKey = try c.decodeIfPresent(SuperKey.self, forKey: .superKey) ?? .none
+        pointerTrigger = try c.decodeIfPresent(PointerTriggerConfig.self, forKey: .pointerTrigger) ?? .init()
         commands = try c.decodeIfPresent([CommandConfig].self, forKey: .commands) ?? Self.defaultCommands
     }
+}
+
+/// Applies an update only after its candidate representation has been persisted successfully.
+public func updatePersistedConfig(
+    _ config: inout YiyiConfig,
+    mutation: (inout YiyiConfig) -> Void,
+    persist: (YiyiConfig) throws -> Void
+) throws {
+    var candidate = config
+    mutation(&candidate)
+    try persist(candidate)
+    config = candidate
 }
 
 public struct ResolvedProvider: Equatable, Sendable {
@@ -184,10 +223,74 @@ public func resolveAPIKey(providerName: String, config: YiyiConfig, environment:
     throw ProviderResolutionError.missingKey(provider: providerName, env: provider.apiKeyEnv)
 }
 
-public enum PromptTemplateError: Error, Equatable { case missingPlaceholder }
-public func renderPrompt(_ template: String, input: String) throws -> String {
-    guard template.contains("{selection}") || template.contains("{input}") else { throw PromptTemplateError.missingPlaceholder }
-    return template.replacingOccurrences(of: "{selection}", with: input).replacingOccurrences(of: "{input}", with: input)
+public struct PromptPlaceholder: Equatable, Sendable {
+    public let range: NSRange
+    public let name: String
+    public let isSupported: Bool
+
+    public init(range: NSRange, name: String, isSupported: Bool) {
+        self.range = range
+        self.name = name
+        self.isSupported = isSupported
+    }
+}
+
+private let supportedPromptPlaceholders: Set<String> = ["selection", "input", "clipboard", "copy"]
+private let promptPlaceholderPattern = try! NSRegularExpression(pattern: #"\{([A-Za-z_][A-Za-z0-9_]*)\}"#)
+
+public func promptPlaceholders(in template: String) -> [PromptPlaceholder] {
+    let fullRange = NSRange(template.startIndex..<template.endIndex, in: template)
+    return promptPlaceholderPattern.matches(in: template, range: fullRange).compactMap { match in
+        guard let nameRange = Range(match.range(at: 1), in: template) else { return nil }
+        let name = String(template[nameRange])
+        return PromptPlaceholder(range: match.range, name: name, isSupported: supportedPromptPlaceholders.contains(name))
+    }
+}
+
+public func promptNeedsSelection(_ template: String) -> Bool {
+    promptPlaceholders(in: template).contains { $0.name == "selection" || $0.name == "input" }
+}
+
+public func promptNeedsClipboard(_ template: String) -> Bool {
+    promptPlaceholders(in: template).contains { $0.name == "clipboard" || $0.name == "copy" }
+}
+
+public enum PromptTemplateError: Error, LocalizedError, Equatable {
+    case missingPlaceholder
+    case unsupportedPlaceholder(String)
+    case missingClipboard
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingPlaceholder: "Prompt must contain {selection}, {input}, {clipboard}, or {copy}."
+        case let .unsupportedPlaceholder(name): "Unknown prompt placeholder {\(name)}. Use {selection}, {input}, {clipboard}, or {copy}."
+        case .missingClipboard: "This prompt requires clipboard text, but the clipboard is empty."
+        }
+    }
+}
+
+public func renderPrompt(_ template: String, input: String, clipboard: String? = nil) throws -> String {
+    let placeholders = promptPlaceholders(in: template)
+    guard !placeholders.isEmpty else { throw PromptTemplateError.missingPlaceholder }
+    if let unsupported = placeholders.first(where: { !$0.isSupported }) {
+        throw PromptTemplateError.unsupportedPlaceholder(unsupported.name)
+    }
+    if promptNeedsClipboard(template), clipboard == nil { throw PromptTemplateError.missingClipboard }
+
+    let source = template as NSString
+    var result = ""
+    var cursor = 0
+    for placeholder in placeholders {
+        result += source.substring(with: NSRange(location: cursor, length: placeholder.range.location - cursor))
+        switch placeholder.name {
+        case "selection", "input": result += input
+        case "clipboard", "copy": result += clipboard!
+        default: break // Unsupported placeholders were rejected above.
+        }
+        cursor = NSMaxRange(placeholder.range)
+    }
+    result += source.substring(from: cursor)
+    return result
 }
 
 public enum ConfigValidationError: Error, LocalizedError, Equatable {
@@ -199,6 +302,7 @@ public enum ConfigValidationError: Error, LocalizedError, Equatable {
     case invalidHotkey(String)
     case emptyPrompt
     case missingPromptPlaceholder
+    case unsupportedPromptPlaceholder(String)
     case invalidTemperature(String)
 
     public var errorDescription: String? {
@@ -210,7 +314,8 @@ public enum ConfigValidationError: Error, LocalizedError, Equatable {
         case let .duplicateHotkey(value): "The shortcut “\(value)” is already used by another command."
         case let .invalidHotkey(value): "“\(value)” is not a valid shortcut."
         case .emptyPrompt: "Prompt cannot be empty."
-        case .missingPromptPlaceholder: "Prompt must contain {selection} or {input}."
+        case .missingPromptPlaceholder: "Prompt must contain {selection}, {input}, {clipboard}, or {copy}."
+        case let .unsupportedPromptPlaceholder(name): "Unknown prompt placeholder {\(name)}. Use {selection}, {input}, {clipboard}, or {copy}."
         case let .invalidTemperature(value): "“\(value)” is not a number."
         }
     }
@@ -232,7 +337,7 @@ public func validateTemperature(_ value: String) throws -> Double? {
 
 public func validateCommand(name: String? = nil, hotkey: String? = nil, prompt: String? = nil, commands: [CommandConfig], excluding index: Int) throws {
     if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ConfigValidationError.emptyCommandName }
-    if let hotkey {
+    if let hotkey, !hotkey.isEmpty {
         do { _ = try parseBinding(hotkey) } catch { throw ConfigValidationError.invalidHotkey(hotkey) }
         if commands.enumerated().contains(where: { $0.offset != index && $0.element.hotkey.lowercased() == hotkey.lowercased() }) {
             throw ConfigValidationError.duplicateHotkey(hotkey)
@@ -240,6 +345,10 @@ public func validateCommand(name: String? = nil, hotkey: String? = nil, prompt: 
     }
     if let prompt {
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ConfigValidationError.emptyPrompt }
-        guard prompt.contains("{selection}") || prompt.contains("{input}") else { throw ConfigValidationError.missingPromptPlaceholder }
+        let placeholders = promptPlaceholders(in: prompt)
+        if let unsupported = placeholders.first(where: { !$0.isSupported }) {
+            throw ConfigValidationError.unsupportedPromptPlaceholder(unsupported.name)
+        }
+        guard placeholders.contains(where: \.isSupported) else { throw ConfigValidationError.missingPromptPlaceholder }
     }
 }

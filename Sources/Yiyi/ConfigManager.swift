@@ -1,16 +1,44 @@
 import Foundation
+import Darwin
 import YiyiCore
 
 @MainActor final class ConfigManager {
-    let directory: URL = {
-        if let path = ProcessInfo.processInfo.environment["YIYI_CONFIG_DIR"], !path.isEmpty { return URL(fileURLWithPath: path, isDirectory: true) }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/yiyi")
-    }()
+    let directory: URL
+    private let persistsChanges: Bool
+
+    init() {
+        if let path = ProcessInfo.processInfo.environment["YIYI_CONFIG_DIR"], !path.isEmpty { directory = URL(fileURLWithPath: path, isDirectory: true) }
+        else { directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/yiyi") }
+        persistsChanges = true
+    }
+
+    private init(draftOf manager: ConfigManager) {
+        directory = manager.directory
+        config = manager.config
+        persistsChanges = false
+    }
+
+    func makeDraft() -> ConfigManager { ConfigManager(draftOf: self) }
+    func resetDraft(to value: YiyiConfig) {
+        precondition(!persistsChanges)
+        config = value
+        onChange?()
+    }
+
+    func apply(_ value: YiyiConfig, replacing expected: YiyiConfig) throws {
+        precondition(persistsChanges)
+        let disk = try JSONDecoder().decode(YiyiConfig.self, from: Data(contentsOf: fileURL))
+        guard config == expected, disk == expected else { throw SettingsSaveError.conflict }
+        try persist(value)
+        config = value
+        onChange?()
+    }
     var fileURL: URL { directory.appendingPathComponent("config.json") }
     private(set) var config = YiyiConfig()
     var onChange: (() -> Void)?
 
     func load() throws {
+        precondition(persistsChanges)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: fileURL.path) {
             config = try JSONDecoder().decode(YiyiConfig.self, from: Data(contentsOf: fileURL))
@@ -20,13 +48,23 @@ import YiyiCore
     }
 
     func save() throws {
+        precondition(persistsChanges)
+        try persist(config)
+    }
+
+    private func persist(_ candidate: YiyiConfig) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode(config).write(to: fileURL, options: .atomic)
+        let temporary = directory.appendingPathComponent(".config-\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard FileManager.default.createFile(atPath: temporary.path, contents: try encoder.encode(candidate), attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        guard rename(temporary.path, fileURL.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
     private func update(_ mutation: (inout YiyiConfig) -> Void) throws {
-        mutation(&config)
-        try save()
+        if persistsChanges { try updatePersistedConfig(&config, mutation: mutation, persist: persist) }
+        else { mutation(&config) }
         onChange?()
     }
 
@@ -80,9 +118,17 @@ import YiyiCore
         }
     }
     func addCommand() throws {
-        try update { $0.commands.append(CommandConfig(name: "New command", hotkey: "cmd+shift+0", prompt: "Translate the following text:\n\n{selection}")) }
+        try update { $0.commands.append(makeNewCommand(existing: $0.commands)) }
     }
-    func deleteCommand(at index: Int) throws { try update { if $0.commands.indices.contains(index) { $0.commands.remove(at: index) } } }
+    func deleteCommand(at index: Int) throws {
+        try update {
+            guard $0.commands.indices.contains(index) else { return }
+            $0.commands.remove(at: index)
+            if $0.pointerTrigger.commandIndex == index { $0.pointerTrigger.enabled = false; $0.pointerTrigger.commandIndex = 0 }
+            else if $0.pointerTrigger.commandIndex > index { $0.pointerTrigger.commandIndex -= 1 }
+        }
+    }
+    func setPointerTrigger(_ value: PointerTriggerConfig) throws { try update { $0.pointerTrigger = value } }
     func setSuperKey(_ value: SuperKey) throws { try update { $0.superKey = value } }
     func setAutoCopy(_ value: Bool) throws { try update { $0.autoCopy = value } }
 

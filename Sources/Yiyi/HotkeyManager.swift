@@ -26,7 +26,7 @@ extension Notification.Name { static let yiyiHotkey = Notification.Name("cc.blac
         unregisterAll()
         superKeyMonitor.configure(superKey: superKey, commands: commands, trusted: AXIsProcessTrusted())
         var errors: [String] = []
-        for (index, command) in commands.enumerated() {
+        for (index, command) in commands.enumerated() where !command.hotkey.isEmpty {
             do {
                 switch try effectiveBinding(command.hotkey, superKey: superKey) {
                 case let .carbon(parsed):

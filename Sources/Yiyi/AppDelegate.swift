@@ -7,18 +7,23 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private let configs = ConfigManager(), hotkeys = HotkeyManager(), panel = ResultPanelController()
+    private let pointer = PointerGestureMonitor()
     private lazy var settings = SettingsWindowController(
         configs: configs,
         accessibilityStatus: { [weak self] in self?.accessibilityStatus() ?? AccessibilityStatus(trusted: false, superKeyTapStatus: "unknown", signatureIdentity: "unavailable", advice: .awaitGrant) },
         requestAccessibility: { [weak self] in self?.openAccessibilitySettings() },
         repairAccessibility: { [weak self] in self?.repairAccessibilityPermission() },
-        reloadFromDisk: { [weak self] in self?.reloadConfig(showErrors: true) }
+        reloadFromDisk: { [weak self] in self?.reloadConfig(showErrors: true) },
+        pointerStatus: { [weak self] in self?.pointer.status ?? "Off" }
     )
     private var statusItem: NSStatusItem!
     private var lastResult: String?
+    private var requests = LatestRequest()
+    private var isCapturing = false
     private var accessibilityPollTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installEditingMenu(settingsTarget: self)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let font = NSFont(name: "PingFangSC-Semibold", size: 15) ?? .systemFont(ofSize: 15, weight: .semibold)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
@@ -41,12 +46,26 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
             Task { @MainActor in self?.runCommand(index: index) }
         }
         configs.onChange = { [weak self] in self?.configDidChange() }
+        pointer.onTrigger = { [weak self] index, selection in
+            let clipboard = NSPasteboard.general.string(forType: .string)
+            let capture = CaptureDecision(text: selection ?? clipboard, source: selection == nil ? .clipboard : .selection)
+            self?.runCommand(index: index, presetCapture: capture)
+        }
         reloadConfig(showErrors: true)
         let initialAccessibility = AccessibilityState.observe()
         handleAccessibilityAdvice(initialAccessibility.advice)
         startAccessibilityPollingIfNeeded(trusted: initialAccessibility.trusted)
+        if CommandLine.arguments.contains("--settings") { settings.show() }
     }
 
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard settings.window?.isVisible == true else { return .terminateNow }
+        settings.confirmDiscardForTermination { allowed in
+            DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: allowed) }
+        }
+        return .terminateLater
+    }
 
     private func rebuildMenu() {
         let menu = NSMenu()
@@ -56,13 +75,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
             for (index, command) in configs.config.commands.enumerated() { let item = add(command.name, action: #selector(runMenuCommand(_:)), to: submenu); item.tag = index }
             let parent = NSMenuItem(title: "Commands", action: nil, keyEquivalent: ""); parent.submenu = submenu; menu.addItem(parent)
         }
-        let providers = NSMenu()
-        for name in configs.config.providers.keys.sorted() {
-            let availability = configs.providerAvailability(name)
-            let item = add(name, action: #selector(selectProvider(_:)), to: providers); item.representedObject = name
-            item.state = name == configs.config.defaultProvider ? .on : .off; item.isEnabled = availability.usable; item.toolTip = availability.reason
-        }
-        let providerParent = NSMenuItem(title: "Provider", action: nil, keyEquivalent: ""); providerParent.submenu = providers; menu.addItem(providerParent)
         menu.addItem(.separator())
         let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
         menu.addItem(.separator())
@@ -92,7 +104,7 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
     }
     @objc private func translateNow() { runCommand(index: 0) }
     @objc private func runMenuCommand(_ sender: NSMenuItem) { runCommand(index: sender.tag) }
-    @objc private func openSettings() { settings.show() }
+    @objc func openSettings() { settings.show() }
     @objc private func copyLast() {
         if let lastResult {
             let before = NSPasteboard.general.changeCount
@@ -114,27 +126,41 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
 
     private func reloadConfig(showErrors: Bool) {
         do {
-            try configs.load(); let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey); rebuildMenu()
+            try configs.load(); let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
+            pointer.configure(config: configs.config.pointerTrigger, commandCount: configs.config.commands.count)
+            rebuildMenu()
             if showErrors, !errors.isEmpty { panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n")) }
         } catch { panel.showError(message: "Config could not be loaded", detail: error.localizedDescription) }
     }
 
     private func configDidChange() {
+        pointer.configure(config: configs.config.pointerTrigger, commandCount: configs.config.commands.count)
         let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
         rebuildMenu()
         if !errors.isEmpty { panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n")) }
     }
 
-    private func runCommand(index: Int) {
+    private func runCommand(index: Int, presetCapture: CaptureDecision? = nil) {
         appLogger.notice("runCommand entered command=\(index)")
-        guard configs.config.commands.indices.contains(index) else { return }
+        guard !isCapturing, configs.config.commands.indices.contains(index) else { return }
         let command = configs.config.commands[index]
+        let frozen = configs.makeDraft()
+        let resolution = Result { let provider = try resolveProvider(config: frozen.config, command: command); return (provider, try frozen.apiKey(for: provider.name)) }
+        let autoCopy = frozen.config.autoCopy
+        let requestID = requests.begin()
+        isCapturing = true
         // AX trust can change after launch. This observation deliberately happens for every
         // invocation; no launch-time value is used to decide whether synthetic copy is allowed.
         let accessibility = AccessibilityState.observe()
         startAccessibilityPollingIfNeeded(trusted: accessibility.trusted)
+        let clipboard = NSPasteboard.general.string(forType: .string).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         Task {
-            let capture = await SelectionCapture.capture(trusted: accessibility.trusted)
+            let capture: CaptureDecision
+            if !promptNeedsSelection(command.prompt) { capture = CaptureDecision(text: clipboard, source: clipboard == nil ? .empty : .clipboard) }
+            else if let presetCapture { capture = presetCapture }
+            else { capture = await SelectionCapture.capture(trusted: accessibility.trusted) }
+            isCapturing = false
+            guard requests.isCurrent(requestID) else { return }
             appLogger.notice("capture completed source=\(capture.source.rawValue, privacy: .public) hasText=\(capture.text != nil)")
             guard let input = capture.text else {
                 if accessibility.trusted {
@@ -149,18 +175,18 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 return
             }
             do {
-                let provider = try resolveProvider(config: configs.config, command: command)
-                let key = try configs.apiKey(for: provider.name)
+                let (provider, key) = try resolution.get()
                 panel.showLoading(
                     command: command.name,
                     capture: capture,
                     relaunch: accessibility.trusted ? nil : { [weak self] in self?.relaunch() }
                 )
-                let prompt = try renderPrompt(command.prompt, input: input)
+                let prompt = try renderPrompt(command.prompt, input: input, clipboard: clipboard)
                 let result = try await OpenAIClient().complete(prompt: prompt, provider: provider, apiKey: key)
+                guard requests.isCurrent(requestID) else { return }
                 appLogger.notice("provider completed characters=\(result.count)")
                 lastResult = result
-                if configs.config.autoCopy {
+                if autoCopy {
                     let before = NSPasteboard.general.changeCount
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(result, forType: .string)
@@ -168,17 +194,18 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 }
                 panel.showResult(result); rebuildMenu()
             } catch let error as OpenAIError {
-                showProviderError(error, command: command)
+                guard requests.isCurrent(requestID) else { return }
+                showProviderError(error, command: command, provider: try? resolution.get().0)
             } catch {
-                let provider = (try? resolveProvider(config: configs.config, command: command))
+                guard requests.isCurrent(requestID) else { return }
+                let provider = try? resolution.get().0
                 panel.showError(command: command.name, provider: provider?.name ?? "", model: provider?.model ?? "", message: error.localizedDescription)
             }
         }
     }
 
-    private func showProviderError(_ error: OpenAIError, command: CommandConfig) {
-        let provider = try? resolveProvider(config: configs.config, command: command)
-        let name = provider?.name ?? configs.config.defaultProvider
+    private func showProviderError(_ error: OpenAIError, command: CommandConfig, provider: ResolvedProvider?) {
+        let name = provider?.name ?? "Connection"
         if case let .http(status, body) = error {
             let reason = status == 401 ? "unauthorized — check \(provider?.apiKeyEnv ?? "API key")" : "request failed (HTTP \(status))"
             panel.showError(command: command.name, provider: name, model: provider?.model ?? "", message: "\(name): \(status) \(reason)", detail: body)

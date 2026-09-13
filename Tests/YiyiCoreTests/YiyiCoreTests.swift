@@ -168,6 +168,40 @@ final class YiyiCoreTests: XCTestCase {
         }
     }
 
+    func testPromptPlaceholdersReportRangesAndTypos() {
+        let template = "Use {selection}, {copy}, and {selecton}."
+        let placeholders = promptPlaceholders(in: template)
+        XCTAssertEqual(placeholders.map(\.name), ["selection", "copy", "selecton"])
+        XCTAssertEqual(placeholders.map(\.isSupported), [true, true, false])
+        XCTAssertEqual((template as NSString).substring(with: placeholders[1].range), "{copy}")
+        XCTAssertTrue(promptNeedsSelection(template))
+        XCTAssertTrue(promptNeedsClipboard(template))
+    }
+
+    func testPromptRenderingIsSinglePassAndSupportsClipboardAliases() throws {
+        XCTAssertEqual(
+            try renderPrompt("Selected={input}; copied={clipboard}/{copy}", input: "literal {copy}", clipboard: "clip {selection}"),
+            "Selected=literal {copy}; copied=clip {selection}/clip {selection}"
+        )
+        XCTAssertEqual(try renderPrompt("Clipboard: {copy}", input: "unused", clipboard: "value"), "Clipboard: value")
+        XCTAssertFalse(promptNeedsSelection("Clipboard: {clipboard}"))
+        XCTAssertTrue(promptNeedsClipboard("Clipboard: {clipboard}"))
+    }
+
+    func testPromptRenderingRejectsMissingClipboardAndUnknownPlaceholders() {
+        XCTAssertThrowsError(try renderPrompt("Clipboard: {copy}", input: "unused")) {
+            XCTAssertEqual($0 as? PromptTemplateError, .missingClipboard)
+        }
+        XCTAssertThrowsError(try renderPrompt("Translate {selecton}", input: "hello")) {
+            XCTAssertEqual($0 as? PromptTemplateError, .unsupportedPlaceholder("selecton"))
+        }
+        XCTAssertThrowsError(try validateCommand(prompt: "Translate {selecton}", commands: [], excluding: 0)) {
+            XCTAssertEqual($0 as? ConfigValidationError, .unsupportedPromptPlaceholder("selecton"))
+            XCTAssertTrue($0.localizedDescription.contains("{selecton}"))
+        }
+        XCTAssertNoThrow(try validateCommand(prompt: "Translate {clipboard}", commands: [], excluding: 0))
+    }
+
     func testHotkeyParsing() throws {
         XCTAssertEqual(try parseHotkey("cmd+-"), ParsedHotkey(keyCode: 27, modifiers: HotkeyModifier.cmd))
         XCTAssertEqual(
@@ -208,6 +242,30 @@ final class YiyiCoreTests: XCTestCase {
                 modifiers: HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control
             ))
         )
+    }
+
+    func testExternalHyperUsesCarbonAllModifierShortcut() throws {
+        let modifiers = HotkeyModifier.cmd | HotkeyModifier.shift | HotkeyModifier.option | HotkeyModifier.control
+        XCTAssertEqual(SuperKey.externalHyper.displayName, "External Hyper (⌃⌥⇧⌘)")
+        XCTAssertNil(SuperKey.externalHyper.keyCode)
+        XCTAssertEqual(SuperKey.externalHyper.deviceFlag, 0)
+        XCTAssertEqual(SuperKey.externalHyper.modifierFlag, 0)
+        XCTAssertEqual(
+            try effectiveBinding("super+-", superKey: .externalHyper),
+            .carbon(ParsedHotkey(keyCode: 27, modifiers: modifiers))
+        )
+        XCTAssertEqual(
+            try effectiveBinding("hyper+-", superKey: .externalHyper),
+            .carbon(ParsedHotkey(keyCode: 27, modifiers: modifiers))
+        )
+    }
+
+    func testExternalHyperDoesNotRewriteExistingAllModifierBindings() {
+        var config = YiyiConfig(superKey: .externalHyper, commands: [
+            CommandConfig(name: "Chinese", hotkey: "cmd+shift+opt+ctrl+-", prompt: "{selection}")
+        ])
+        XCTAssertFalse(migrateLegacySuperKeyBindings(in: &config))
+        XCTAssertEqual(config.commands[0].hotkey, "cmd+shift+opt+ctrl+-")
     }
 
     func testLegacyHyperBindingMigratesOnceWithoutChangingOtherCommands() {
@@ -322,6 +380,43 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertFalse(config.autoCopy)
         XCTAssertEqual(config.commands.first?.model, "override")
         XCTAssertEqual(config.commands.first?.reasoningEffort, .low)
+    }
+
+    func testProviderGroupsCustomEndpointsWithoutRenamingConfigKeys() throws {
+        XCTAssertEqual(providerGroup(for: "deepseek"), .deepseek)
+        XCTAssertEqual(providerGroup(for: "qwen"), .qwen)
+        XCTAssertEqual(providerGroup(for: "DGX Spark"), .openAICompatible)
+        XCTAssertEqual(providerGroup(for: "custom"), .openAICompatible)
+
+        let original = YiyiConfig(
+            defaultProvider: "DGX Spark",
+            providers: ["DGX Spark": ProviderConfig(baseURL: "http://dgx.local/v1", model: "local", apiKeyEnv: "DGX_KEY")]
+        )
+        let decoded = try JSONDecoder().decode(YiyiConfig.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(decoded.defaultProvider, "DGX Spark")
+        XCTAssertEqual(Set(decoded.providers.keys), ["DGX Spark"])
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testNewCommandsHaveUniqueNamesAndNoConflictingShortcut() {
+        let first = makeNewCommand(existing: [])
+        let second = makeNewCommand(existing: [first])
+        let third = makeNewCommand(existing: [first, second])
+        XCTAssertEqual([first.name, second.name, third.name], ["New command", "New command 2", "New command 3"])
+        XCTAssertTrue([first, second, third].allSatisfy { $0.hotkey.isEmpty && $0.prompt.contains("{selection}") })
+        XCTAssertNoThrow(try validateCommand(hotkey: "", commands: [first, second, third], excluding: 0))
+    }
+
+    func testFailedPersistenceDoesNotReplaceConfig() {
+        enum WriteFailure: Error { case failed }
+        var config = YiyiConfig(defaultProvider: "deepseek")
+
+        XCTAssertThrowsError(try updatePersistedConfig(&config, mutation: {
+            $0.defaultProvider = "qwen"
+        }, persist: { _ in
+            throw WriteFailure.failed
+        }))
+        XCTAssertEqual(config.defaultProvider, "deepseek")
     }
 
     func testProviderAndModelOverrides() throws {
@@ -478,6 +573,106 @@ final class YiyiCoreTests: XCTestCase {
         ) {
             XCTAssertEqual($0 as? OpenAIError, .truncated)
         }
+    }
+
+    func testPointerTriggerDecodingDefaultsForLegacyConfig() throws {
+        let data = Data(#"{"defaultProvider":"deepseek","providers":{},"commands":[]}"#.utf8)
+        let config = try JSONDecoder().decode(YiyiConfig.self, from: data)
+        XCTAssertEqual(config.pointerTrigger, PointerTriggerConfig())
+    }
+
+    func testPointerTriggerRoundTrips() throws {
+        let config = YiyiConfig(pointerTrigger: PointerTriggerConfig(enabled: true, commandIndex: 1))
+        XCTAssertEqual(try JSONDecoder().decode(YiyiConfig.self, from: JSONEncoder().encode(config)), config)
+    }
+
+    func testPointerHoldDispatchesOnceOnQualifyingRelease() {
+        var gesture = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.moved, 0.46, 6, 0)))
+        XCTAssertTrue(gesture.consume(pointer(.primaryUp, 0.50, 6, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryUp, 0.70, 6, 0)))
+    }
+
+    func testPointerHoldRejectsEarlyRelease() {
+        var gesture = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryUp, 0.44, 0, 0)))
+    }
+
+    func testPointerHoldCancelsForTravelAndLatchesUntilRelease() {
+        var gesture = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.moved, 0.2, 8.01, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0.3, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryDown, 2, 0, 0)))
+        XCTAssertTrue(gesture.consume(pointer(.primaryUp, 2.45, 0, 0)))
+    }
+
+    func testPointerHoldCancelsForLostModifierAndExtraButton() {
+        for cancellation in [
+            pointer(.moved, 0.2, 0, 0, modifier: false),
+            pointer(.cancel, 0.2, 0, 0)
+        ] {
+            var gesture = PointerGestureRecognizer(enabled: true)
+            XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
+            XCTAssertFalse(gesture.consume(cancellation))
+            XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1, 0, 0)))
+        }
+    }
+
+    func testPointerHoldRequiresModifierAndRespectsDisabledState() {
+        var disabled = PointerGestureRecognizer()
+        XCTAssertFalse(disabled.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(disabled.consume(pointer(.primaryUp, 1, 0, 0)))
+        var missingModifier = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(missingModifier.consume(pointer(.primaryDown, 0, 0, 0, modifier: false)))
+        XCTAssertFalse(missingModifier.consume(pointer(.primaryUp, 1, 0, 0)))
+    }
+
+    private func pointer(_ kind: PointerGestureEvent.Kind, _ time: TimeInterval, _ x: Double, _ y: Double, modifier: Bool = true) -> PointerGestureEvent {
+        PointerGestureEvent(kind: kind, timestamp: time, x: x, y: y, modifierHeld: modifier)
+    }
+
+    func testPointerPartialConfigUsesSafeDefaults() throws {
+        let partial = try JSONDecoder().decode(YiyiConfig.self, from: Data(#"{"pointerTrigger":{}}"#.utf8))
+        XCTAssertEqual(partial.pointerTrigger, PointerTriggerConfig())
+    }
+
+    func testSlowPreviousRequestCannotReplaceNewestResult() {
+        var requests = LatestRequest()
+        let first = requests.begin()
+        XCTAssertTrue(requests.isCurrent(first))
+        let second = requests.begin()
+        XCTAssertFalse(requests.isCurrent(first))
+        XCTAssertTrue(requests.isCurrent(second))
+        XCTAssertFalse(requests.isCurrent(UUID()))
+    }
+
+    func testCredentialDestinationChangesRequireConfirmation() {
+        XCTAssertTrue(requiresKeyDestinationConfirmation(from: "https://old.example/v1", to: "https://new.example/v1"))
+        XCTAssertTrue(requiresKeyDestinationConfirmation(from: "https://example.com/v1", to: "http://example.com/v1"))
+        XCTAssertTrue(requiresKeyDestinationConfirmation(from: "http://localhost:11434/v1", to: "http://localhost:1234/v1"))
+        XCTAssertFalse(requiresKeyDestinationConfirmation(from: "https://example.com/v1", to: "https://example.com:443/v2"))
+    }
+
+    func testConnectionValidation() throws {
+        var provider = ProviderConfig(baseURL: "https://example.com/v1", model: "model", apiKeyEnv: "KEY")
+        XCTAssertNoThrow(try validateConnection(provider))
+        for invalid in ["not a URL", "ftp://example.com", "https://user:pass@example.com/v1", "https://example.com/v1/chat/completions", "https://example.com/v1?key=value", "https://example.com/v1#fragment"] {
+            provider.baseURL = invalid
+            XCTAssertThrowsError(try validateConnection(provider))
+        }
+        provider.baseURL = "http://127.0.0.1:11434/v1"; provider.model = " "
+        XCTAssertThrowsError(try validateConnection(provider))
+    }
+
+    func testPromptUnicodeRangesAndLiteralInputArePreserved() throws {
+        let template = "译😀 {selection} / {clipboard}"
+        let tokens = promptPlaceholders(in: template)
+        XCTAssertEqual((template as NSString).substring(with: tokens[0].range), "{selection}")
+        XCTAssertEqual(try renderPrompt(template, input: "{clipboard}", clipboard: "原文"), "译😀 {clipboard} / 原文")
     }
 
     func testSettingsValidationRejectsInvalidValues() throws {

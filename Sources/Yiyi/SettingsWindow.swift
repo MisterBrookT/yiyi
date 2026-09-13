@@ -5,40 +5,75 @@ import OSLog
 
 private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "settings")
 
-@MainActor final class SettingsWindowController: NSWindowController, NSTextViewDelegate, NSWindowDelegate {
+private enum SettingsPane: String, CaseIterable {
+    case translation = "Translation", commands = "Commands", general = "General"
+    var symbol: String {
+        switch self { case .translation: "character.bubble"; case .commands: "command"; case .general: "gearshape" }
+    }
+    var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
+}
+
+@MainActor final class SettingsWindowController: NSWindowController, NSTextViewDelegate, NSTextFieldDelegate, NSWindowDelegate, NSToolbarDelegate {
     private let configs: ConfigManager
+    private let liveConfigs: ConfigManager
+    private var baseline: YiyiConfig
+    private let confirmation: ((String) -> Bool)?
+    private let footer = NSView()
+    private let saveButton = NSButton(title: "Save", target: nil, action: nil)
+    private let saveStatus = NSTextField(wrappingLabelWithString: "No changes")
+    private var saveError: String?
+    private var shortcutModes: [Int: Bool] = [:]
+    private var closingAfterDiscard = false
+    private var keyWasEntered = false
+    private var approvedKeyDestination: String?
     private let accessibilityStatus: () -> AccessibilityStatus
     private let requestAccessibility: () -> Void
     private let repairAccessibility: () -> Void
     private let reloadFromDisk: () -> Void
+    private let pointerStatus: () -> String
     private let detail = SettingsBackgroundView()
+    private var selectedPane: SettingsPane = .translation
+    private var selectedCommand = 0
+    private var fieldDrafts: [String: String] = [:]
+    private var rebuilding = false
+    private var editedFields: Set<ObjectIdentifier> = []
+    private var promptSelections: [Int: NSRange] = [:]
     private var paneView: NSView?
     private var selectedProvider: String
     private var fieldErrors: [String: String] = [:]
-    /// Advanced rows collapse again every time Settings reopens: the plain view is the default.
+    private var promptDrafts: [Int: String] = [:]
+    /// Keep disclosure and navigation state while this settings session is alive.
     private var expandedAdvanced: Set<String> = []
     private var centered = false
-    private let contentWidth: CGFloat = 590
-    private let labelWidth: CGFloat = 150
-    private let controlWidth: CGFloat = 370
+    private let contentWidth: CGFloat = 640
+    private let labelWidth: CGFloat = 112
+    private let controlWidth: CGFloat = 376
+    private var formWidth: CGFloat { labelWidth + 16 + controlWidth + 24 }
 
     init(
         configs: ConfigManager,
         accessibilityStatus: @escaping () -> AccessibilityStatus,
         requestAccessibility: @escaping () -> Void,
         repairAccessibility: @escaping () -> Void,
-        reloadFromDisk: @escaping () -> Void
+        reloadFromDisk: @escaping () -> Void,
+        confirmation: ((String) -> Bool)? = nil,
+        pointerStatus: @escaping () -> String = { "Off" }
     ) {
-        self.configs = configs
+        self.liveConfigs = configs
+        self.baseline = configs.config
+        self.configs = configs.makeDraft()
+        self.confirmation = confirmation
+        self.pointerStatus = pointerStatus
         self.accessibilityStatus = accessibilityStatus
         self.requestAccessibility = requestAccessibility
         self.repairAccessibility = repairAccessibility
         self.reloadFromDisk = reloadFromDisk
         selectedProvider = configs.config.defaultProvider
-        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 646, height: 500), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        self.configs.onChange = { [weak self] in self?.saveError = nil; self?.updateFooter() }
         buildChrome()
         rebuild(resize: true, animate: false)
     }
@@ -46,6 +81,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     required init?(coder: NSCoder) { nil }
 
     func show() {
+        if window?.isVisible != true { reloadFromDisk(); resetDraft() }
         rebuild(resize: true, animate: false)
         if !centered { window?.center(); centered = true }
         logWindowState("requested")
@@ -74,36 +110,85 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
         guard let window else { return }
         detail.wantsLayer = true
         window.contentView = detail
-        window.titlebarSeparatorStyle = .line
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelSettings))
+        cancel.bezelStyle = .rounded; cancel.setAccessibilityIdentifier("settings.cancel")
+        saveButton.target = self; saveButton.action = #selector(saveSettings(_:)); saveButton.bezelStyle = .rounded
+        saveButton.keyEquivalent = "\r"; saveButton.setAccessibilityIdentifier("settings.save")
+        saveStatus.font = .systemFont(ofSize: 11); saveStatus.textColor = .secondaryLabelColor
+        saveStatus.setAccessibilityIdentifier("settings.status")
+        let actions = NSStackView(views: [saveStatus, NSView(), cancel, saveButton]); actions.orientation = .horizontal; actions.spacing = 8
+        footer.addSubview(actions); detail.addSubview(footer)
+        footer.translatesAutoresizingMaskIntoConstraints = false; actions.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([footer.leadingAnchor.constraint(equalTo: detail.leadingAnchor), footer.trailingAnchor.constraint(equalTo: detail.trailingAnchor), footer.bottomAnchor.constraint(equalTo: detail.bottomAnchor), footer.heightAnchor.constraint(equalToConstant: 64), actions.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 24), actions.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -24), actions.centerYAnchor.constraint(equalTo: footer.centerYAnchor), saveStatus.widthAnchor.constraint(lessThanOrEqualToConstant: 380)])
+        window.titlebarSeparatorStyle = .automatic
+        window.toolbarStyle = .preference
+        let toolbar = NSToolbar(identifier: "yiyi.settings")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        toolbar.selectedItemIdentifier = selectedPane.identifier
+        window.toolbar = toolbar
+        NotificationCenter.default.addObserver(self, selector: #selector(promptHistoryChanged(_:)), name: .NSUndoManagerDidUndoChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(promptHistoryChanged(_:)), name: .NSUndoManagerDidRedoChange, object: nil)
     }
 
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { SettingsPane.allCases.map(\.identifier) }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let pane = SettingsPane(rawValue: identifier.rawValue) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = pane.rawValue; item.paletteLabel = pane.rawValue
+        item.image = NSImage(systemSymbolName: pane.symbol, accessibilityDescription: pane.rawValue)
+        item.target = self; item.action = #selector(selectPane(_:))
+        return item
+    }
+    @objc private func selectPane(_ sender: NSToolbarItem) {
+        guard let pane = SettingsPane(rawValue: sender.itemIdentifier.rawValue) else { return }
+        window?.makeFirstResponder(nil)
+        selectedPane = pane
+        window?.toolbar?.selectedItemIdentifier = pane.identifier
+        rebuild(animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
 
     private func rebuild(resize: Bool = true, animate: Bool = false) {
+        guard !rebuilding else { return }
+        rebuilding = true
+        defer { rebuilding = false }
+        if let editor = window?.contentView?.allSubviews.compactMap({ $0 as? NSTextView }).first(where: { $0.identifier?.rawValue.hasSuffix(".prompt") == true }) {
+            if let rawIndex = editor.identifier?.rawValue.split(separator: ".").dropFirst().first, let index = Int(rawIndex) {
+                promptSelections[index] = editor.selectedRange()
+            }
+            // AppKit's window undo manager must not retain edits targeting an editor
+            // that belongs to a different command after navigation or removal.
+            editor.undoManager?.removeAllActions()
+        }
         paneView?.removeFromSuperview()
         let document = paneDocument()
         let documentSize = document.fittingSize
         document.frame = NSRect(origin: .zero, size: documentSize)
         let scroll = NSScrollView()
         scroll.drawsBackground = false
-        scroll.hasVerticalScroller = documentSize.height > pageHeightLimit
+        scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.documentView = document
         detail.addSubview(scroll)
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: detail.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: detail.trailingAnchor), scroll.topAnchor.constraint(equalTo: detail.topAnchor), scroll.bottomAnchor.constraint(equalTo: detail.bottomAnchor)])
+        NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: detail.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: detail.trailingAnchor), scroll.topAnchor.constraint(equalTo: detail.topAnchor), scroll.bottomAnchor.constraint(equalTo: footer.topAnchor)])
         paneView = scroll
         document.layoutSubtreeIfNeeded()
-        let desiredHeight = min(pageHeightLimit, max(300, documentSize.height))
-        window?.title = "yiyi Settings"
-        window?.minSize = NSSize(width: 646, height: min(desiredHeight, 400))
+        let desiredHeight = min(pageHeightLimit, max(360, min(620, documentSize.height + 64)))
+        window?.title = "\(selectedPane.rawValue)"
+        window?.minSize = NSSize(width: contentWidth, height: min(desiredHeight, 400))
         if resize { resizeWindow(to: desiredHeight, animate: animate) }
         configureKeyLoop(in: document)
+        updateFooter()
     }
 
     /// One page: show all of it whenever the display allows, and only then scroll.
     private var pageHeightLimit: CGFloat {
         let screen = window?.screen ?? NSScreen.main
-        return max(400, (screen?.visibleFrame.height ?? 900) - 80)
+        return max(360, (screen?.visibleFrame.height ?? 900) - 140)
     }
 
     private func resizeWindow(to height: CGFloat, animate: Bool) {
@@ -116,14 +201,19 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
 
     private func paneDocument() -> NSView {
-        let content = sections([servicePane(), shortcutsPane(), systemPane()])
+        let content: NSView
+        switch selectedPane {
+        case .translation: content = servicePane()
+        case .commands: content = shortcutsPane()
+        case .general: content = systemPane()
+        }
         let document = SettingsDocumentView()
         document.setAccessibilityIdentifier("settings.page")
         document.addSubview(content)
         content.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
-            content.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -28),
+            content.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 56),
+            content.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -56),
             content.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
             content.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -28),
             document.widthAnchor.constraint(equalToConstant: contentWidth)
@@ -133,88 +223,147 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
 
     private func servicePane() -> NSView {
         if configs.config.providers[selectedProvider] == nil { selectedProvider = configs.config.defaultProvider }
-        let names = configs.config.providers.keys.sorted()
-        let choices = NSStackView()
-        choices.orientation = .vertical; choices.alignment = .leading; choices.spacing = 4
-        for name in names {
-            let button = NSButton(radioButtonWithTitle: name, target: self, action: #selector(selectProvider(_:)))
-            button.identifier = NSUserInterfaceItemIdentifier(name)
-            button.setAccessibilityIdentifier("provider.default.\(name)")
-            button.state = name == configs.config.defaultProvider ? .on : .off
-            choices.addArrangedSubview(button)
-        }
         guard let provider = configs.config.providers[selectedProvider] else {
-            return section("Service", rows: [row("Translate with", choices)])
+            return label("The saved connection is missing. Reload your configuration in General → Advanced.", secondary: true)
         }
         let key = NSSecureTextField(string: "")
-        style(key); key.placeholderString = provider.apiKey == nil ? "Paste your API key" : "Stored — empty clears"
+        style(key); key.placeholderString = configs.providerAvailability(selectedProvider).usable ? "Leave unchanged" : "API key"
         key.identifier = NSUserInterfaceItemIdentifier("provider.api-key"); key.setAccessibilityIdentifier("provider.api-key"); key.target = self; key.action = #selector(commitField(_:)); stretch(key)
         let ready = configs.providerAvailability(selectedProvider).usable
-        let status = label(ready ? "Ready" : "No key yet — paste one above", secondary: !ready)
+        let status = label(ready ? "API key available" : "Enter the key supplied by your server.", secondary: true)
         status.maximumNumberOfLines = 0; status.usesSingleLineMode = false; status.lineBreakMode = .byWordWrapping
         status.preferredMaxLayoutWidth = controlWidth
         if !ready { status.textColor = Theme.attention }
         status.setAccessibilityIdentifier("provider.key-status")
         status.setAccessibilityValue(ready ? "ready" : "missing")
         stretch(status); status.heightAnchor.constraint(greaterThanOrEqualToConstant: 18).isActive = true
-        var rows = [row("Translate with", choices), row("API key", key), row("", status)]
+        let model = field(provider.model, id: "provider.model")
+        let baseURL = field(provider.baseURL, id: "provider.base-url", mono: true)
+        prosePlaceholder("https://api.example.com/v1", in: baseURL)
+        prosePlaceholder("Model name from your server", in: model)
+        var rows = [row("Base URL", baseURL), row("API key", key), row("", status), row("Model", model)]
         rows.append(advancedToggle("provider"))
         if expandedAdvanced.contains("provider") {
-            let selected = popup(names, selected: selectedProvider, id: "provider.selector", action: #selector(showProvider(_:)))
-            let baseURL = field(provider.baseURL, id: "provider.base-url", mono: true)
             let env = field(provider.apiKeyEnv, id: "provider.api-key-env", mono: true)
-            let model = field(provider.model, id: "provider.model", mono: true)
             let temperature = field(provider.temperature.map { String($0) } ?? "", id: "provider.temperature", mono: true); prosePlaceholder("Empty to omit", in: temperature)
             let effort = popup(ReasoningEffort.allCases.map(\.rawValue), selected: provider.reasoningEffort.rawValue, id: "provider.reasoning-effort", action: #selector(providerEffort(_:))); effort.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
-            let addName = field("", id: "provider.add-name"); prosePlaceholder("New provider name", in: addName)
-            let add = NSButton(title: "Add Provider", target: self, action: #selector(addProvider(_:))); add.setAccessibilityIdentifier("provider.add")
-            let remove = NSButton(title: "Remove Provider", target: self, action: #selector(removeProvider)); remove.setAccessibilityIdentifier("provider.remove")
-            let source = label(configs.apiKeyStatus(for: selectedProvider), mono: true, secondary: true)
-            source.maximumNumberOfLines = 0; source.usesSingleLineMode = false; source.lineBreakMode = .byWordWrapping
-            source.preferredMaxLayoutWidth = controlWidth
-            source.setAccessibilityIdentifier("provider.key-source")
-            stretch(source); source.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
-            rows += [row("Editing", selected), row("Base URL", baseURL), row("API key env", env), row("Model", model), row("Temperature", temperature), row("Reasoning effort", effort), row("Key source", source), row("", remove), row("New provider", addName), row("", add)]
+            rows += [row("Key environment", env), row("Temperature", temperature), row("Reasoning", effort)]
         }
         appendError(for: "provider", to: &rows)
-        return section("Service", rows: rows)
+        return section("OpenAI-compatible connection", rows: rows)
     }
 
     private func shortcutsPane() -> NSView {
-        let leader = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
-        var sectionsList: [NSView] = [section("Shortcuts", rows: [row("Leader key", leader)])]
-        for (index, command) in configs.config.commands.enumerated() {
+        let chooser = NSPopUpButton()
+        chooser.addItems(withTitles: configs.config.commands.enumerated().map { $0.element.name.isEmpty ? "Command \($0.offset + 1)" : $0.element.name })
+        selectedCommand = min(selectedCommand, max(0, configs.config.commands.count - 1))
+        chooser.selectItem(at: selectedCommand)
+        chooser.target = self; chooser.action = #selector(chooseCommand(_:)); chooser.setAccessibilityIdentifier("commands.selector")
+        let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Command")!, target: self, action: #selector(addCommand))
+        add.bezelStyle = .rounded; add.toolTip = "Add Command"; add.setAccessibilityIdentifier("commands.add")
+        let remove = NSButton(title: "Delete…", target: self, action: #selector(removeCommand(_:)))
+        remove.bezelStyle = .rounded; remove.tag = selectedCommand; remove.isEnabled = !configs.config.commands.isEmpty
+        remove.setAccessibilityIdentifier("commands.delete")
+        chooser.widthAnchor.constraint(equalToConstant: 228).isActive = true
+        chooser.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let selection = NSStackView(views: [chooser, add, remove]); selection.orientation = .horizontal; selection.spacing = 8
+        let hyper = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
+        hyper.toolTip = "Use a right-side modifier for yiyi, or choose External Hyper for an existing ⌃⌥⇧⌘ remap."
+        var sectionsList: [NSView] = [row("Hyper Key", hyper), row("Command", selection)]
+        for (index, command) in configs.config.commands.enumerated() where index == selectedCommand {
             let name = field(command.name, id: "command.\(index).name")
-            let hotkey = HotkeyRecorder(value: command.hotkey, recordsSuperKey: true); hotkey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
-            let prompt = NSTextView(); prompt.string = command.prompt; prompt.font = .systemFont(ofSize: 13); prompt.textContainerInset = NSSize(width: 8, height: 8); prompt.delegate = self; prompt.identifier = NSUserInterfaceItemIdentifier("command.\(index).prompt"); prompt.setAccessibilityIdentifier("command.\(index).prompt")
-            let promptScroll = NSScrollView(); promptScroll.documentView = prompt; promptScroll.hasVerticalScroller = true; promptScroll.borderType = .bezelBorder; promptScroll.heightAnchor.constraint(equalToConstant: 92).isActive = true; stretch(promptScroll)
-            var rows = [row("Name", name), row("Shortcut", hotkey), row("Prompt", promptScroll)]
-            rows.append(advancedToggle("command.\(index)"))
+            let hyperMode = shortcutModes[index] ?? (command.hotkey.hasPrefix("super+") || command.hotkey.hasPrefix("hyper+"))
+            let mode = popup(["Keyboard", "Hyper Key"], selected: hyperMode ? "Hyper Key" : "Keyboard", id: "command.\(index).hotkey-mode", action: #selector(changeShortcutMode(_:))); mode.tag = index
+            let hotkey = HotkeyRecorder(value: command.hotkey, recordsSuperKey: hyperMode); hotkey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
+            let shortcut = NSStackView(views: [mode, hotkey]); shortcut.orientation = .horizontal; shortcut.spacing = 8
+            let prompt = NSTextView(frame: NSRect(x: 0, y: 0, width: formWidth - 2, height: 188))
+            prompt.string = promptDrafts[index] ?? command.prompt
+            if let range = promptSelections[index], NSMaxRange(range) <= (prompt.string as NSString).length { prompt.setSelectedRange(range) }
+            prompt.isRichText = false; prompt.allowsUndo = true; prompt.isAutomaticQuoteSubstitutionEnabled = false
+            prompt.isHorizontallyResizable = false; prompt.isVerticallyResizable = true
+            prompt.autoresizingMask = [.width]; prompt.textContainer?.widthTracksTextView = true
+            prompt.font = .systemFont(ofSize: 13); prompt.textColor = .textColor; prompt.backgroundColor = .textBackgroundColor
+            prompt.textContainerInset = NSSize(width: 12, height: 12)
+            let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 3
+            prompt.defaultParagraphStyle = paragraph
+            prompt.delegate = self; prompt.identifier = NSUserInterfaceItemIdentifier("command.\(index).prompt"); prompt.setAccessibilityIdentifier("command.\(index).prompt")
+            highlightPrompt(prompt)
+            let promptScroll = SettingsEditorScrollView(); promptScroll.documentView = prompt; promptScroll.hasVerticalScroller = true; promptScroll.autohidesScrollers = true
+            promptScroll.borderType = .noBorder
+            promptScroll.heightAnchor.constraint(equalToConstant: 188).isActive = true
+            promptScroll.widthAnchor.constraint(equalToConstant: formWidth).isActive = true
+            promptScroll.wantsLayer = true; promptScroll.layer?.cornerRadius = 8; promptScroll.layer?.masksToBounds = true
+            let promptStatus = label(fieldErrors["command.\(index).prompt"] ?? "", secondary: true)
+            promptStatus.identifier = NSUserInterfaceItemIdentifier("command.\(index).prompt.status")
+            promptStatus.setAccessibilityIdentifier(fieldErrors["command.\(index).prompt"] == nil ? "command.\(index).prompt.status" : "command.\(index).prompt.error")
+            promptStatus.textColor = fieldErrors["command.\(index).prompt"] == nil ? Theme.muted : .systemRed
+            promptStatus.font = .systemFont(ofSize: 11)
+            promptStatus.widthAnchor.constraint(equalToConstant: formWidth).isActive = true
+            let insert = NSButton(title: "Selected Text", target: self, action: #selector(insertSelection))
+            insert.bezelStyle = .rounded; insert.controlSize = .small; insert.font = .systemFont(ofSize: 11)
+            insert.toolTip = "Insert {selection} at the cursor. yiyi replaces it with the text you select."
+            insert.setAccessibilityIdentifier("command.\(index).insert-selection")
+            let promptHeading = label("Prompt"); promptHeading.font = .systemFont(ofSize: 13, weight: .semibold)
+            let clipboard = NSButton(title: "Clipboard Text", target: self, action: #selector(insertClipboard))
+            clipboard.bezelStyle = .rounded; clipboard.controlSize = .small; clipboard.font = .systemFont(ofSize: 11)
+            clipboard.toolTip = "Insert {clipboard}. Uses clipboard text from before the command runs."
+            clipboard.setAccessibilityIdentifier("command.\(index).insert-clipboard")
+            let spacer = NSView()
+            let promptHeader = NSStackView(views: [promptHeading, spacer, insert, clipboard]); promptHeader.orientation = .horizontal; promptHeader.alignment = .centerY
+            promptHeader.widthAnchor.constraint(equalToConstant: formWidth).isActive = true
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            let promptGroup = column([promptHeader, promptScroll, promptStatus], spacing: 8)
+            var rows = [row("Name", name), row("Shortcut", shortcut)]
+            sectionsList.append(section("", rows: rows))
+            sectionsList.append(promptGroup)
+            rows = [advancedToggle("command.\(index)")]
             if expandedAdvanced.contains("command.\(index)") {
-                let provider = popup(["inherit"] + configs.config.providers.keys.sorted(), selected: command.provider ?? "inherit", id: "command.\(index).provider", action: #selector(commandProvider(_:))); provider.tag = index
+                if let override = command.provider, let connection = configs.config.providers[override] {
+                    let reset = NSButton(title: "Use main connection", target: self, action: #selector(clearCommandConnection(_:))); reset.tag = index
+                    reset.setAccessibilityIdentifier("command.\(index).use-default-connection")
+                    rows += [row("Connection override", label(connection.baseURL, secondary: true)), row("", reset)]
+                }
                 let model = field(command.model ?? "", id: "command.\(index).model", mono: true); prosePlaceholder("Inherit", in: model)
                 let effort = popup(["inherit"] + ReasoningEffort.allCases.map(\.rawValue), selected: command.reasoningEffort?.rawValue ?? "inherit", id: "command.\(index).reasoning-effort", action: #selector(commandEffort(_:))); effort.tag = index
-                let remove = NSButton(title: "Remove Command", target: self, action: #selector(removeCommand(_:))); remove.tag = index; remove.setAccessibilityIdentifier("command.\(index).remove")
-                rows += [row("Service", provider), row("Model override", model), row("Reasoning override", effort), row("", remove)]
+                rows += [row("Model override", model), row("Reasoning", effort)]
             }
             appendError(for: "command.\(index)", to: &rows)
-            sectionsList.append(section(command.name.isEmpty ? "Command \(index + 1)" : command.name, rows: rows))
+            sectionsList.append(column(rows, spacing: 12))
         }
-        let add = NSButton(title: "Add Command", target: self, action: #selector(addCommand)); add.setAccessibilityIdentifier("commands.add")
-        sectionsList.append(row("", add))
-        return sections(sectionsList)
+        if configs.config.commands.isEmpty {
+            let empty = label("Add a command to choose a shortcut and write its prompt.", secondary: true)
+            empty.widthAnchor.constraint(equalToConstant: formWidth).isActive = true
+            empty.setAccessibilityIdentifier("commands.empty")
+            sectionsList.append(empty)
+        }
+        appendError(for: "commands", to: &sectionsList)
+        return column(sectionsList, spacing: 20)
     }
 
     private func systemPane() -> NSView {
         let copy = NSButton(checkboxWithTitle: "Copy translations to the clipboard", target: self, action: #selector(changeAutoCopy(_:))); copy.state = configs.config.autoCopy ? .on : .off; copy.setAccessibilityIdentifier("provider.auto-copy")
         let status = accessibilityStatus()
         let trusted = label(status.trusted ? "Accessibility trusted" : "Accessibility not granted", secondary: status.trusted); trusted.setAccessibilityIdentifier("permission.trusted"); trusted.setAccessibilityValue(status.trusted ? "yes" : "no")
-        var rows = [row("", copy), row("", trusted)]
+        var rows = [row("Clipboard", copy), row("Accessibility", trusted)]
         if status.advice == .repairStaleGrant {
             let warning = label("The existing grant belongs to an older yiyi build and will be re-requested."); warning.maximumNumberOfLines = 0; warning.usesSingleLineMode = false; warning.lineBreakMode = .byWordWrapping; warning.textColor = Theme.attention; warning.setAccessibilityIdentifier("permission.stale-grant"); stretch(warning); warning.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true; rows.append(row("", warning))
             let repair = NSButton(title: "Repair Accessibility Permission…", target: self, action: #selector(repairAccessibilityPermission)); repair.setAccessibilityIdentifier("permission.repair"); rows.append(row("", repair))
         } else if !status.trusted {
             let enable = NSButton(title: "Enable Accessibility…", target: self, action: #selector(enableAccessibility)); enable.setAccessibilityIdentifier("permission.enable"); rows.append(row("", enable))
+        }
+        let pointer = NSButton(checkboxWithTitle: "Option + click-and-hold (experimental)", target: self, action: #selector(changePointer(_:)))
+        pointer.state = configs.config.pointerTrigger.enabled ? .on : .off
+        pointer.isEnabled = !configs.config.commands.isEmpty
+        pointer.setAccessibilityIdentifier("pointer.enabled")
+        rows.append(row("Mouse / trackpad", pointer))
+        if configs.config.pointerTrigger.enabled {
+            let command = popup(configs.config.commands.map(\.name), selected: "", id: "pointer.command", action: #selector(changePointerCommand(_:)))
+            command.selectItem(at: configs.config.pointerTrigger.commandIndex)
+            let help = label("Hold ⌥ and the primary button for half a second, then release without dragging. Uses the selection at press time, or the clipboard. Normal clicks are unchanged.", secondary: true)
+            stretch(help)
+            rows += [row("Run command", command), row("", help), row("Gesture status", label(configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save", secondary: true))]
+            let permission = NSButton(title: "Input Monitoring Settings…", target: self, action: #selector(openInputMonitoring))
+            rows.append(row("", permission))
         }
         rows.append(advancedToggle("system"))
         if expandedAdvanced.contains("system") {
@@ -230,7 +379,8 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
             let files = NSStackView(views: [edit, reload]); files.orientation = .horizontal; files.spacing = 8; files.alignment = .centerY
             rows += [row("Leader key tap", tap), row("Signing identity", signature), row("Config file", files)]
         }
-        return section("System", rows: rows)
+        appendError(for: "general", to: &rows)
+        return section("General", rows: rows)
     }
 
     /// Disclosure row: power-user fields exist, but never greet a new user.
@@ -263,18 +413,13 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
 
     private func section(_ title: String, rows: [NSView]) -> NSView {
         let heading = label("", secondary: true)
-        heading.attributedStringValue = NSAttributedString(string: title.uppercased(), attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: Theme.muted, .kern: 1.1])
+        heading.attributedStringValue = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.labelColor])
         let slug = title.lowercased().replacingOccurrences(of: " ", with: "-")
-        heading.setAccessibilityIdentifier("section.\(slug)"); heading.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true; heading.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        var grouped: [NSView] = []
-        for (index, value) in rows.enumerated() {
-            if index > 0 { let line = NSBox(); line.boxType = .separator; line.heightAnchor.constraint(equalToConstant: 1).isActive = true; grouped.append(line) }
-            grouped.append(value)
-        }
-        let rowStack = column(grouped, spacing: 9)
+        heading.setAccessibilityIdentifier("section.\(slug)"); heading.widthAnchor.constraint(equalToConstant: formWidth).isActive = true; heading.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        let rowStack = column(rows, spacing: 12)
         let panel = SettingsGroupView(); panel.addSubview(rowStack); rowStack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([rowStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor), rowStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor), rowStack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12), rowStack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -12), panel.widthAnchor.constraint(equalToConstant: labelWidth + 16 + controlWidth)])
-        return column([heading, panel], spacing: 6)
+        NSLayoutConstraint.activate([rowStack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12), rowStack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -12), rowStack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 16), rowStack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -16), panel.widthAnchor.constraint(equalToConstant: formWidth)])
+        return title.isEmpty ? panel : column([heading, panel], spacing: 8)
     }
 
     private func row(_ title: String, _ control: NSView) -> NSView {
@@ -292,10 +437,10 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
 
     private func column(_ views: [NSView], spacing: CGFloat) -> NSStackView { let stack = NSStackView(views: views); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = spacing; return stack }
-    private func label(_ text: String, mono: Bool = false, secondary: Bool = false) -> NSTextField { let value = NSTextField(wrappingLabelWithString: text); value.font = mono ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .systemFont(ofSize: 13); value.textColor = secondary ? Theme.muted : Theme.ink; return value }
+    private func label(_ text: String, mono: Bool = false, secondary: Bool = false) -> NSTextField { let value = NSTextField(wrappingLabelWithString: text); value.font = mono ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .systemFont(ofSize: 13); value.textColor = secondary ? .secondaryLabelColor : .labelColor; return value }
     private func stretch(_ view: NSView) { view.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true }
-    private func field(_ value: String, id: String, mono: Bool = false) -> NSTextField { let field = NSTextField(string: value); style(field); if mono { field.font = .monospacedSystemFont(ofSize: 12, weight: .regular) }; field.identifier = NSUserInterfaceItemIdentifier(id); field.setAccessibilityIdentifier(id); field.target = self; field.action = #selector(commitField(_:)); stretch(field); return field }
-    private func style(_ field: NSTextField) { field.font = .systemFont(ofSize: 13); field.isBezeled = true; field.bezelStyle = .roundedBezel }
+    private func field(_ value: String, id: String, mono: Bool = false) -> NSTextField { let field = NSTextField(string: fieldDrafts[id] ?? value); style(field); if mono { field.font = .monospacedSystemFont(ofSize: 12, weight: .regular) }; field.identifier = NSUserInterfaceItemIdentifier(id); field.setAccessibilityIdentifier(id); field.target = self; field.action = #selector(commitField(_:)); stretch(field); return field }
+    private func style(_ field: NSTextField) { field.font = .systemFont(ofSize: 13); field.isBezeled = true; field.bezelStyle = .roundedBezel; field.delegate = self }
     private func popup(_ values: [String], selected: String, id: String, action: Selector) -> NSPopUpButton { let popup = NSPopUpButton(); popup.addItems(withTitles: values); popup.selectItem(withTitle: selected); popup.target = self; popup.action = action; popup.setAccessibilityIdentifier(id); return popup }
 
     private func prosePlaceholder(_ value: String, in field: NSTextField) {
@@ -306,7 +451,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
 
     private func appendError(for prefix: String, to rows: inout [NSView]) {
-        for match in fieldErrors.filter({ $0.key == prefix || $0.key.hasPrefix(prefix + ".") }).sorted(by: { $0.key < $1.key }) {
+        for match in fieldErrors.filter({ ($0.key == prefix || $0.key.hasPrefix(prefix + ".")) && !$0.key.hasSuffix(".prompt") }).sorted(by: { $0.key < $1.key }) {
             let warning = label(match.value); warning.textColor = .systemRed; warning.setAccessibilityIdentifier("\(match.key).error"); stretch(warning)
             rows.append(row("", warning))
         }
@@ -324,45 +469,123 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
 
     private func configureKeyLoop(in root: NSView) {
-        let controls = root.allSubviews.filter { ($0 as? NSControl)?.isEnabled == true || $0 is NSTextView }
+        let controls = (root.allSubviews + footer.allSubviews).filter { ($0 as? NSControl)?.isEnabled == true || $0 is NSTextView }
         for (current, next) in zip(controls, controls.dropFirst() + controls.prefix(1)) { current.nextKeyView = next }
         window?.initialFirstResponder = controls.first
     }
 
-    @objc private func selectProvider(_ sender: NSButton) { guard let name = sender.identifier?.rawValue else { return }; do { try configs.setDefaultProvider(name); selectedProvider = name; fieldErrors.removeValue(forKey: "provider.default") } catch { fieldErrors["provider.default"] = error.localizedDescription }; rebuild() }
-    @objc private func showProvider(_ sender: NSPopUpButton) { selectedProvider = sender.titleOfSelectedItem ?? selectedProvider; rebuild() }
     @objc private func providerEffort(_ sender: NSPopUpButton) { guard let name = sender.identifier?.rawValue, let value = sender.titleOfSelectedItem.flatMap(ReasoningEffort.init(rawValue:)) else { return }; do { try configs.setProvider(name, reasoningEffort: value) } catch { reject(error, at: "provider.reasoning-effort"); return }; rebuild() }
-    @objc private func commandProvider(_ sender: NSPopUpButton) { do { try configs.setCommand(sender.tag, provider: sender.titleOfSelectedItem == "inherit" ? .some(nil) : .some(sender.titleOfSelectedItem)) } catch { reject(error, at: "command.\(sender.tag).provider"); return }; rebuild() }
+    @objc private func clearCommandConnection(_ sender: NSButton) {
+        do { try configs.setCommand(sender.tag, provider: .some(nil)) }
+        catch { reject(error, at: "command.\(sender.tag).provider"); return }
+        rebuild()
+    }
+    @objc private func changeShortcutMode(_ sender: NSPopUpButton) {
+        window?.makeFirstResponder(nil)
+        shortcutModes[sender.tag] = sender.indexOfSelectedItem == 1
+        do { try configs.setCommand(sender.tag, hotkey: "") }
+        catch { reject(error, at: "command.\(sender.tag).hotkey"); return }
+        rebuild()
+    }
     @objc private func commandEffort(_ sender: NSPopUpButton) { let raw = sender.titleOfSelectedItem; do { try configs.setCommand(sender.tag, reasoningEffort: raw == "inherit" ? .some(nil) : .some(raw.flatMap(ReasoningEffort.init(rawValue:)))) } catch { reject(error, at: "command.\(sender.tag).reasoning-effort"); return }; rebuild() }
-    @objc private func changeSuperKey(_ sender: NSPopUpButton) { guard let selected = sender.titleOfSelectedItem, let value = SuperKey.allCases.first(where: { $0.displayName == selected }) else { return }; try? configs.setSuperKey(value); rebuild() }
-    @objc private func changeAutoCopy(_ sender: NSButton) { try? configs.setAutoCopy(sender.state == .on) }
+    @objc private func changeSuperKey(_ sender: NSPopUpButton) {
+        guard let selected = sender.titleOfSelectedItem, let value = SuperKey.allCases.first(where: { $0.displayName == selected }) else { return }
+        do { try configs.setSuperKey(value); fieldErrors.removeValue(forKey: "general.leader") }
+        catch { reject(error, at: "general.leader"); return }
+        rebuild()
+    }
+    @objc private func changePointer(_ sender: NSButton) {
+        var value = configs.config.pointerTrigger; value.enabled = sender.state == .on
+        if !configs.config.commands.indices.contains(value.commandIndex) { value.commandIndex = 0 }
+        do { try configs.setPointerTrigger(value) } catch { reject(error, at: "general.pointer"); return }
+        rebuild()
+    }
+    @objc private func changePointerCommand(_ sender: NSPopUpButton) {
+        var value = configs.config.pointerTrigger; value.commandIndex = sender.indexOfSelectedItem
+        do { try configs.setPointerTrigger(value) } catch { reject(error, at: "general.pointer") }
+    }
+    @objc private func openInputMonitoring() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") { NSWorkspace.shared.open(url) }
+    }
+    @objc private func changeAutoCopy(_ sender: NSButton) {
+        do { try configs.setAutoCopy(sender.state == .on); fieldErrors.removeValue(forKey: "general.clipboard") }
+        catch { reject(error, at: "general.clipboard"); return }
+    }
     @objc private func toggleAdvanced(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
+        window?.makeFirstResponder(nil)
         if expandedAdvanced.contains(id) { expandedAdvanced.remove(id) } else { expandedAdvanced.insert(id) }
         rebuild()
     }
     @objc private func enableAccessibility() { requestAccessibility(); rebuild() }
     @objc private func editConfigFile() { NSWorkspace.shared.open(configs.fileURL) }
-    @objc private func reloadFromFile() { reloadFromDisk(); rebuild() }
+    @objc private func reloadFromFile() {
+        window?.makeFirstResponder(nil)
+        let reload = { [weak self] in guard let self else { return }; self.reloadFromDisk(); self.resetDraft(); self.rebuild() }
+        if hasUnsavedChanges { confirmAction("Discard unsaved changes?", detail: "Reloading replaces your edits with the saved settings.", button: "Discard", completion: reload) }
+        else { reload() }
+    }
     @objc private func repairAccessibilityPermission() { repairAccessibility(); rebuild() }
-    @objc private func addProvider(_ sender: NSButton) {
-        guard let name = control(accessibilityID: "provider.add-name") as? NSTextField else { return }
-        do { try configs.addProvider(named: name.stringValue); selectedProvider = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); fieldErrors.removeValue(forKey: "provider.add-name") }
-        catch { reject(error, at: "provider.add-name"); return }
+    @objc private func chooseCommand(_ sender: NSPopUpButton) {
+        if let editor = control(accessibilityID: "command.\(selectedCommand).prompt") as? NSTextView { promptSelections[selectedCommand] = editor.selectedRange() }
+        window?.makeFirstResponder(nil)
+        selectedCommand = sender.indexOfSelectedItem
         rebuild()
     }
-    @objc private func removeProvider() { do { try configs.deleteProvider(named: selectedProvider); selectedProvider = configs.config.defaultProvider; fieldErrors.removeValue(forKey: "provider.remove") } catch { reject(error, at: "provider.remove"); return }; rebuild() }
-    @objc private func addCommand() { try? configs.addCommand(); rebuild() }
-    @objc private func removeCommand(_ sender: NSButton) { try? configs.deleteCommand(at: sender.tag); rebuild() }
+    @objc private func insertSelection() { insertPromptToken("{selection}") }
+    @objc private func insertClipboard() { insertPromptToken("{clipboard}") }
+    private func insertPromptToken(_ token: String) {
+        guard let editor = control(accessibilityID: "command.\(selectedCommand).prompt") as? NSTextView else { return }
+        window?.makeFirstResponder(editor)
+        let text = editor.string as NSString
+        let range = editor.selectedRange()
+        if range.length == token.utf16.count, text.substring(with: range) == token { return }
+        // Repeated clicks should select the placeholder, not duplicate the input.
+        if range.length == 0, range.location >= token.utf16.count {
+            let preceding = NSRange(location: range.location - token.utf16.count, length: token.utf16.count)
+            if text.substring(with: preceding) == token {
+                editor.setSelectedRange(preceding); editor.scrollRangeToVisible(preceding); return
+            }
+        }
+        editor.insertText(token, replacementRange: range)
+    }
+    @objc private func addCommand() {
+        window?.makeFirstResponder(nil)
+        do { try configs.addCommand(); selectedCommand = configs.config.commands.count - 1 }
+        catch { reject(error, at: "commands.add"); return }
+        rebuild()
+    }
+    @objc private func removeCommand(_ sender: NSButton) {
+        window?.makeFirstResponder(nil)
+        let index = sender.tag
+        guard configs.config.commands.indices.contains(index) else { return }
+        confirmAction("Delete “\(configs.config.commands[index].name)”?", detail: "Its prompt and shortcut will be removed when you save.", button: "Delete") { [weak self] in
+            guard let self else { return }
+            do {
+                try self.configs.deleteCommand(at: index)
+                self.promptDrafts = Dictionary(uniqueKeysWithValues: self.promptDrafts.filter { $0.key != index }.map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
+                self.fieldErrors = self.fieldErrors.filter { !$0.key.hasPrefix("command.") }
+                self.fieldDrafts = self.fieldDrafts.filter { !$0.key.hasPrefix("command.") }
+                self.promptSelections.removeAll(); self.shortcutModes.removeAll()
+                self.selectedCommand = min(index, max(0, self.configs.config.commands.count - 1))
+            } catch { self.reject(error, at: "commands.remove"); return }
+            self.rebuild()
+        }
+    }
     @objc private func commitField(_ sender: NSTextField) {
         let id = sender.identifier?.rawValue ?? ""
+        let hadError = fieldErrors[id] != nil
+        editedFields.remove(ObjectIdentifier(sender))
         do {
             switch id {
-            case "provider.base-url": try configs.setProvider(selectedProvider, baseURL: sender.stringValue)
-            case "provider.add-name": return
+            case "provider.base-url": try configs.setProvider(selectedProvider, baseURL: sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
             case "provider.api-key-env": try configs.setProvider(selectedProvider, apiKeyEnv: sender.stringValue)
-            case "provider.model": try configs.setProvider(selectedProvider, model: sender.stringValue)
-            case "provider.api-key": try configs.setProvider(selectedProvider, apiKey: .some(sender.stringValue.isEmpty ? nil : sender.stringValue))
+            case "provider.model": try configs.setProvider(selectedProvider, model: sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+            case "provider.api-key":
+                if !sender.stringValue.isEmpty {
+                    try configs.setProvider(selectedProvider, apiKey: .some(sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    keyWasEntered = true
+                }
             case "provider.temperature": try configs.setProvider(selectedProvider, temperature: .some(try validateTemperature(sender.stringValue)))
             default:
                 let parts = id.split(separator: ".").map(String.init)
@@ -372,8 +595,33 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
                 }
             }
             fieldErrors.removeValue(forKey: id)
-        } catch { reject(error, at: id); return }
-        rebuild()
+            fieldDrafts.removeValue(forKey: id)
+        } catch {
+            if id != "provider.api-key" { fieldDrafts[id] = sender.stringValue }
+            reject(error, at: id); return
+        }
+        if let chooser = control(accessibilityID: "commands.selector") as? NSPopUpButton, configs.config.commands.indices.contains(selectedCommand) {
+            chooser.item(at: selectedCommand)?.title = configs.config.commands[selectedCommand].name
+        }
+        if id == "provider.api-key" {
+            sender.stringValue = ""
+            sender.placeholderString = "Leave unchanged"
+            let ready = configs.providerAvailability(selectedProvider).usable
+            let status = control(accessibilityID: "provider.key-status") as? NSTextField
+            status?.stringValue = ready ? "API key available" : "Enter the key supplied by your server."
+            status?.textColor = ready ? .secondaryLabelColor : Theme.attention
+            status?.setAccessibilityValue(ready ? "ready" : "missing")
+        }
+        saveError = nil
+        updateFooter()
+        if hadError { rebuild() }
+    }
+    func controlTextDidChange(_ notification: Notification) {
+        if let field = notification.object as? NSTextField { editedFields.insert(ObjectIdentifier(field)); saveError = nil; updateFooter() }
+    }
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField, editedFields.contains(ObjectIdentifier(field)) else { return }
+        commitField(field)
     }
 
     func prepareOffscreen(appearance: NSAppearance) {
@@ -384,7 +632,7 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     }
     func control(accessibilityID: String) -> NSView? { window?.contentView.flatMap { root in ([root] + root.allSubviews).first { $0.accessibilityIdentifier() == accessibilityID } } }
     func renderPNG(to url: URL, bottom: Bool = false) throws {
-        guard let content = window?.contentView else { return }
+        guard let content = window?.contentView?.superview else { return }
         content.layoutSubtreeIfNeeded()
         if bottom, let scroll = paneView as? NSScrollView, let document = scroll.documentView {
             document.scrollToVisible(NSRect(x: 0, y: max(0, document.bounds.maxY - 1), width: 1, height: 1))
@@ -398,13 +646,105 @@ private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "s
     func commitRecordedHotkey(accessibilityID: String, value: String) {
         (control(accessibilityID: accessibilityID) as? HotkeyRecorder)?.commitForJourney(value)
     }
-    func textDidEndEditing(_ notification: Notification) {
-        guard let text = notification.object as? NSTextView, let id = text.identifier?.rawValue, let index = Int(id.split(separator: ".").dropLast().last ?? "") else { return }
-        do { try configs.setCommand(index, prompt: text.string); fieldErrors.removeValue(forKey: "command.\(index).prompt") }
-        catch { fieldErrors["command.\(index).prompt"] = error.localizedDescription }
-        rebuild()
+    @objc private func promptHistoryChanged(_ notification: Notification) {
+        guard let editor = control(accessibilityID: "command.\(selectedCommand).prompt") as? NSTextView,
+              let history = notification.object as? UndoManager, editor.undoManager === history else { return }
+        // Undo changes text storage without sending the normal typing notification.
+        persistPrompt(Notification(name: NSText.didChangeNotification, object: editor))
     }
-    func windowShouldClose(_ sender: NSWindow) -> Bool { true }
+    func textDidChange(_ notification: Notification) { persistPrompt(notification) }
+    func textDidEndEditing(_ notification: Notification) { persistPrompt(notification) }
+
+    private func persistPrompt(_ notification: Notification) {
+        guard let text = notification.object as? NSTextView, let id = text.identifier?.rawValue else { return }
+        let parts = id.split(separator: ".")
+        guard parts.count == 3, parts[0] == "command", parts[2] == "prompt", let index = Int(parts[1]), configs.config.commands.indices.contains(index) else { return }
+        promptDrafts[index] = text.string
+        // Leave IME composition and its marked attributes alone until text is committed.
+        guard !text.hasMarkedText() else { updateFooter(); return }
+        do {
+            if configs.config.commands[index].prompt != text.string { try configs.setCommand(index, prompt: text.string) }
+            promptDrafts.removeValue(forKey: index)
+            fieldErrors.removeValue(forKey: id)
+        } catch { fieldErrors[id] = "Not saved: \(error.localizedDescription)" }
+        // Keep the editor and selection alive; rebuilding here can discard a draft
+        // and swallow the click that ended editing.
+        let status = window?.contentView?.allSubviews.first { $0.identifier?.rawValue == "\(id).status" } as? NSTextField
+        status?.stringValue = fieldErrors[id] ?? ""
+        status?.textColor = fieldErrors[id] == nil ? Theme.muted : .systemRed
+        status?.setAccessibilityIdentifier(fieldErrors[id] == nil ? "\(id).status" : "\(id).error")
+        highlightPrompt(text)
+        saveError = nil
+        updateFooter()
+    }
+
+    private var hasUnsavedChanges: Bool { configs.config != baseline || !promptDrafts.isEmpty || !fieldDrafts.isEmpty || !editedFields.isEmpty }
+    private func updateFooter() {
+        saveButton.isEnabled = hasUnsavedChanges && fieldErrors.isEmpty
+        saveStatus.stringValue = saveError ?? (fieldErrors.isEmpty ? (hasUnsavedChanges ? "Unsaved changes" : "No changes") : "Review the highlighted fields.")
+        saveStatus.textColor = saveError == nil ? .secondaryLabelColor : .systemRed
+        window?.isDocumentEdited = hasUnsavedChanges
+    }
+    private func resetDraft() {
+        baseline = liveConfigs.config
+        promptDrafts.removeAll(); fieldDrafts.removeAll(); fieldErrors.removeAll(); editedFields.removeAll()
+        shortcutModes.removeAll(); promptSelections.removeAll(); saveError = nil
+        selectedProvider = baseline.defaultProvider
+        keyWasEntered = false; approvedKeyDestination = nil
+        configs.resetDraft(to: baseline)
+    }
+    @objc func saveSettings(_ sender: Any?) {
+        window?.makeFirstResponder(nil)
+        guard fieldErrors.isEmpty else { updateFooter(); return }
+        do {
+            if let provider = configs.config.providers[selectedProvider] { try validateConnection(provider) }
+            for (index, command) in configs.config.commands.enumerated() {
+                try validateCommand(name: command.name, hotkey: command.hotkey, prompt: command.prompt, commands: configs.config.commands, excluding: index)
+                if configs.config.superKey == .none, command.hotkey.hasPrefix("super+") || command.hotkey.hasPrefix("hyper+") { throw SettingsSaveError.hyperKeyDisabled }
+            }
+            if let previous = baseline.providers[selectedProvider], let candidate = configs.config.providers[selectedProvider],
+               requiresKeyDestinationConfirmation(from: previous.baseURL, to: candidate.baseURL),
+               !keyWasEntered, approvedKeyDestination != candidate.baseURL, configs.providerAvailability(selectedProvider).usable {
+                confirmAction("Use the existing API key with this server?", detail: "The connection address changed. Only continue if you trust the new server with your existing key.", button: "Use Key and Save") { [weak self] in
+                    self?.approvedKeyDestination = candidate.baseURL; self?.saveSettings(nil)
+                }
+                return
+            }
+            try liveConfigs.apply(configs.config, replacing: baseline)
+            baseline = configs.config
+            keyWasEntered = false; approvedKeyDestination = nil
+            saveError = nil
+            updateFooter()
+            saveStatus.stringValue = "Saved"
+        } catch { saveError = error.localizedDescription; updateFooter() }
+    }
+    @objc private func cancelSettings() { window?.performClose(nil) }
+    private func confirmAction(_ title: String, detail: String, button: String, completion: @escaping () -> Void) {
+        if let confirmation { if confirmation(title) { completion() }; return }
+        guard let window, window.attachedSheet == nil else { return }
+        let alert = NSAlert(); alert.messageText = title; alert.informativeText = detail
+        alert.addButton(withTitle: "Keep Editing"); alert.addButton(withTitle: button)
+        alert.beginSheetModal(for: window) { response in if response == .alertSecondButtonReturn { completion() } }
+    }
+    func confirmDiscardForTermination(_ completion: @escaping (Bool) -> Void) {
+        window?.makeFirstResponder(nil)
+        guard hasUnsavedChanges else { completion(true); return }
+        if let confirmation { completion(confirmation("Quit without saving?")); return }
+        guard let window, window.attachedSheet == nil else { completion(false); return }
+        let alert = NSAlert(); alert.messageText = "Quit without saving?"
+        alert.informativeText = "Your unsaved settings will be discarded."
+        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Quit Without Saving")
+        alert.beginSheetModal(for: window) { completion($0 == .alertSecondButtonReturn) }
+    }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.makeFirstResponder(nil)
+        if closingAfterDiscard { closingAfterDiscard = false; return true }
+        guard hasUnsavedChanges else { return true }
+        confirmAction("Discard unsaved changes?", detail: "Your saved commands and connection will not change.", button: "Discard") { [weak self] in
+            guard let self else { return }; self.resetDraft(); self.closingAfterDiscard = true; self.window?.performClose(nil)
+        }
+        return false
+    }
 }
 private final class SettingsWindow: NSWindow {
     override var canBecomeKey: Bool { true }
@@ -414,14 +754,14 @@ private final class SettingsWindow: NSWindow {
 private final class SettingsDocumentView: NSView {
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        Theme.paper.setFill()
+        Theme.settingsBackground.setFill()
         dirtyRect.fill()
     }
 }
 
 private final class SettingsBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        Theme.paper.setFill()
+        Theme.settingsBackground.setFill()
         dirtyRect.fill()
     }
 }
@@ -430,15 +770,26 @@ private final class SettingsGroupView: NSView {
     override var intrinsicContentSize: NSSize {
         guard let content = subviews.first else { return .zero }
         let size = content.fittingSize
-        return NSSize(width: size.width, height: size.height + 24)
+        return NSSize(width: size.width + 24, height: size.height + 32)
     }
     override func draw(_ dirtyRect: NSRect) {
-        Theme.surface.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
-        Theme.line.setStroke()
-        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        Theme.settingsSurface.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10).fill()
+        Theme.settingsBorder.setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         border.lineWidth = 1
         border.stroke()
+    }
+}
+
+@MainActor private final class SettingsEditorScrollView: NSScrollView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = Theme.settingsBorder.cgColor
+        }
+        layer?.borderWidth = 1
+        layer?.cornerRadius = 8
     }
 }
 
@@ -446,8 +797,10 @@ private final class SettingsGroupView: NSView {
     var onCommit: ((String) -> Void)?
     private var recording = false
     private let recordsSuperKey: Bool
-    init(value: String, recordsSuperKey: Bool = false) { self.recordsSuperKey = recordsSuperKey; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
+    private let originalValue: String
+    init(value: String, recordsSuperKey: Bool = false) { self.recordsSuperKey = recordsSuperKey; originalValue = value; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
     override var intrinsicContentSize: NSSize {
+        if recording || title == "Record Shortcut" { return NSSize(width: 146, height: 26) }
         let count = keycapLabels.count
         return NSSize(width: max(74, CGFloat(count) * 27 + CGFloat(max(0, count - 1)) * 4), height: 26)
     }
@@ -477,7 +830,7 @@ private final class SettingsGroupView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func keyDown(with event: NSEvent) {
         guard recording else { super.keyDown(with: event); return }
-        if event.keyCode == 53 { recording = false; title = "Record Shortcut"; return }
+        if event.keyCode == 53 { recording = false; title = originalValue.isEmpty ? "Record Shortcut" : originalValue; return }
         if event.keyCode == 51 || event.keyCode == 117 { recording = false; title = "Record Shortcut"; onCommit?(""); return }
         if recordsSuperKey {
             guard let value = formatSuperKeyBinding(keyCode: UInt32(event.keyCode)) else { NSSound.beep(); return }

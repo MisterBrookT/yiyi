@@ -1,0 +1,26 @@
+# Configuration
+
+Settings edits are staged in memory. Save validates them and atomically replaces `~/.config/yiyi/config.json`; runtime hotkeys and the connection change only after a successful write. If the file changes outside the window, Save refuses to overwrite it. Cancel and reopen, or use General → Advanced → Reload from file.
+
+The generic connection form edits the current default connection. Existing provider dictionary keys, other connections, and per-command overrides are preserved. Advanced command settings can remove a connection override to inherit the main connection. To change the default among legacy named connections, edit `defaultProvider` in the config file.
+
+API key lookup order:
+
+1. `providers.<name>.apiKey` in config.
+2. The process environment variable named by `apiKeyEnv`.
+3. That variable in `~/.config/yiyi/.env`.
+4. `~/.config/yiyi/apikey`, for the default connection only.
+
+An empty key field leaves the existing key unchanged. To remove an inline key, remove its `apiKey` entry through General → Advanced → Edit config file, then reload. Other key sources still apply. The JSON file is mode `0600`; keys are not encrypted. Keep `.env` and `apikey` owner-readable only too.
+
+Base URLs must use HTTP(S), without embedded credentials, query strings, or fragments. Use the API root (usually `/v1`), not `/chat/completions`. The app appends `/chat/completions`. The model must match a model exposed by the endpoint. Provider-specific reasoning support varies; Advanced exposes reasoning effort and temperature. Empty temperature omits it.
+
+Commands support optional `provider`, `model`, and `reasoningEffort` overrides. Prompts must contain a supported input token. Substitution is single-pass: token-looking text inside an input is preserved literally, not substituted again.
+
+Shortcuts accept `cmd`, `shift`, `ctrl`, and `opt`, plus a key. `super+t` and `hyper+t` use the selected Hyper Key. Right-side leader keys require Accessibility. External Hyper registers the all-four-modifier chord and requires an existing system remap. Empty shortcuts remain unassigned.
+
+The pointer setting is `"pointerTrigger": {"enabled": false, "commandIndex": 0}`. Old configs decode with the gesture disabled. Deleting commands through Settings updates this index; deleting its target disables the gesture.
+
+## Permissions
+
+Accessibility may need to be granted again after a signing-identity or application-path change. General → Advanced shows the signing and event-tap status. Permission repair targets yiyi’s entry only. A physical keyboard is required to exercise Carbon hotkeys; AppleScript-generated keystrokes do not exercise that path.

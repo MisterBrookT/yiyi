@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>yiyi — Translate selected text on macOS</title>
+    <meta
+      name="description"
+      content="A quiet macOS menu-bar translator for selected text, powered by your OpenAI-compatible endpoint."
+    />
+    <link rel="canonical" href="https://misterbrookt.github.io/yiyi/" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0d0d0f"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="yiyi — Translate selected text on macOS"
+    />
+    <meta
+      property="og:description"
+      content="Select text, run a command, and keep working. Bring your own OpenAI-compatible endpoint."
+    />
+    <meta property="og:url" content="https://misterbrookt.github.io/yiyi/" />
+    <meta
+      property="og:image"
+      content="https://misterbrookt.github.io/yiyi/assets/social-preview.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="yiyi, a quiet macOS menu-bar translator"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="yiyi — Translate selected text on macOS"
+    />
+    <meta
+      name="twitter:description"
+      content="Select text, run a command, and keep working."
+    />
+    <meta
+      name="twitter:image"
+      content="https://misterbrookt.github.io/yiyi/assets/social-preview.png"
+    />
+    <link rel="icon" href="assets/app-icon.png" type="image/png" />
+    <link
+      rel="preload"
+      as="image"
+      href="assets/result-light.png"
+      media="(prefers-color-scheme: light)"
+    />
+    <link
+      rel="preload"
+      as="image"
+      href="assets/result-dark.png"
+      media="(prefers-color-scheme: dark)"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "yiyi",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "macOS 14 or newer",
+        "url": "https://misterbrookt.github.io/yiyi/",
+        "downloadUrl": "https://github.com/MisterBrookT/yiyi#install",
+        "description": "A macOS menu-bar translator for selected text using an OpenAI-compatible endpoint."
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header wrap">
+      <a class="brand" href="#top" aria-label="yiyi home"
+        ><img src="assets/app-icon.png" width="32" height="32" alt="" /><span
+          >yiyi</span
+        ></a
+      >
+      <nav aria-label="Primary">
+        <a href="#how">How it works</a
+        ><a href="https://github.com/MisterBrookT/yiyi">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" id="top">
+        <p class="eyebrow">Native menu-bar translator for macOS</p>
+        <h1>Translate what you select.<br />Stay where you are.</h1>
+        <p class="lede">
+          Run a saved translation command from any app with a keyboard shortcut,
+          Hyper Key, or an optional pointer hold. yiyi sends the text to the
+          OpenAI-compatible endpoint you choose.
+        </p>
+        <div class="actions">
+          <a
+            class="button primary"
+            href="https://github.com/MisterBrookT/yiyi#install"
+            >Get yiyi on GitHub</a
+          >
+          <a class="button secondary" href="#how">See how it works</a>
+        </div>
+        <p class="requirements">
+          macOS 14+ · Build from source with Xcode Command Line Tools
+        </p>
+      </section>
+
+      <figure class="hero-media wrap-wide">
+        <picture>
+          <source
+            srcset="assets/result-dark.png"
+            media="(prefers-color-scheme: dark)"
+          />
+          <img
+            src="assets/result-light.png"
+            width="840"
+            height="338"
+            alt="yiyi result panel showing a completed translation"
+            fetchpriority="high"
+          />
+        </picture>
+        <figcaption>
+          A focused result panel that gets out of the way.
+        </figcaption>
+      </figure>
+
+      <section class="story wrap" id="how" aria-labelledby="how-title">
+        <div class="section-copy">
+          <p class="eyebrow">How it works</p>
+          <h2 id="how-title">One command, any selected text</h2>
+          <p>
+            Select text in the app you are using, invoke yiyi, then read or copy
+            the result. Accessibility permission enables selection capture;
+            without it, clipboard-based commands remain available.
+          </p>
+        </div>
+        <ol class="steps">
+          <li>
+            <span>01</span><strong>Select</strong>
+            <p>Highlight the words you want to translate.</p>
+          </li>
+          <li>
+            <span>02</span><strong>Invoke</strong>
+            <p>
+              Use a keyboard shortcut, Hyper Key, or the optional pointer
+              gesture.
+            </p>
+          </li>
+          <li>
+            <span>03</span><strong>Continue</strong>
+            <p>
+              Read the result in a compact native panel and return to your work.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="feature split wrap-wide" aria-labelledby="commands-title">
+        <div class="section-copy sticky-copy">
+          <p class="eyebrow">Your commands</p>
+          <h2 id="commands-title">Make translation fit the task</h2>
+          <p>
+            Save commands with their own name, shortcut, and prompt. Insert
+            <code>{selection}</code> for selected text or
+            <code>{clipboard}</code> when the clipboard is the intended input.
+            Review everything before Save; Cancel leaves the active setup
+            unchanged.
+          </p>
+        </div>
+        <figure class="product-frame">
+          <picture>
+            <source
+              srcset="assets/settings-mobile-dark.png"
+              media="(max-width: 720px) and (prefers-color-scheme: dark)"
+              width="708"
+              height="374"
+            />
+            <source
+              srcset="assets/settings-mobile-light.png"
+              media="(max-width: 720px)"
+              width="708"
+              height="374"
+            />
+            <source
+              srcset="assets/settings-dark.png"
+              media="(prefers-color-scheme: dark)"
+            />
+            <img
+              src="assets/settings-light.png"
+              width="1280"
+              height="1364"
+              alt="A yiyi translation command with a highlighted selection input in its prompt"
+              loading="lazy"
+            />
+          </picture>
+          <figcaption>Your prompt, with highlighted inputs.</figcaption>
+        </figure>
+      </section>
+
+      <section class="feature gesture wrap" aria-labelledby="gesture-title">
+        <div class="section-copy">
+          <p class="eyebrow">More than keys</p>
+          <h2 id="gesture-title">Hold, then release</h2>
+          <p>
+            As an experimental, opt-in trigger, hold Option and the primary
+            mouse or trackpad click for 0.45 seconds, then release. Moving to
+            drag cancels the gesture, so ordinary selection stays ordinary.
+          </p>
+        </div>
+        <div
+          class="gesture-demo"
+          aria-label="Option plus primary click hold gesture illustration"
+        >
+          <kbd>⌥ option</kbd><span aria-hidden="true">+</span>
+          <div class="pointer"><span></span>hold · release</div>
+        </div>
+        <p class="note">
+          The gesture listens passively and may require Input Monitoring
+          permission.
+        </p>
+      </section>
+
+      <section class="details wrap" aria-labelledby="details-title">
+        <div class="section-copy">
+          <p class="eyebrow">A small native tool</p>
+          <h2 id="details-title">Only the controls that matter</h2>
+        </div>
+        <div class="detail-grid">
+          <article>
+            <h3>Your endpoint</h3>
+            <p>
+              Enter a Base URL, API key, and model for an OpenAI-compatible
+              service. Text is sent to that chosen endpoint.
+            </p>
+          </article>
+          <article>
+            <h3>Local configuration</h3>
+            <p>
+              Commands and credentials stay in local configuration. Inline keys
+              are plaintext in an owner-only file, not Keychain. Captured text
+              is not written to diagnostic logs.
+            </p>
+          </article>
+          <article>
+            <h3>Keyboard or Hyper Key</h3>
+            <p>
+              Use an ordinary modifier shortcut, a right-side leader key, or an
+              existing external ⌃⌥⇧⌘ remap.
+            </p>
+          </article>
+          <article>
+            <h3>Native and dependency-free</h3>
+            <p>
+              Built with macOS frameworks. The source installer requires macOS
+              14+ and Xcode Command Line Tools.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="closing wrap" aria-labelledby="closing-title">
+        <h2 id="closing-title">Translation, without changing context.</h2>
+        <p>
+          Build yiyi from source, connect your endpoint, and choose how to
+          invoke it.
+        </p>
+        <a
+          class="button primary"
+          href="https://github.com/MisterBrookT/yiyi#install"
+          >Get yiyi on GitHub</a
+        >
+      </section>
+    </main>
+
+    <footer class="site-footer wrap">
+      <span>yiyi for macOS</span>
+      <div>
+        <a href="https://github.com/MisterBrookT/yiyi">Source</a
+        ><a href="https://github.com/MisterBrookT/yiyi/issues">Issues</a>
+      </div>
+    </footer>
+  </body>
+</html>

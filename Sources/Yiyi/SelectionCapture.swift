@@ -35,7 +35,7 @@ private let captureLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "ca
         let axSelection = focused.text
         let sentinel = "__yiyi_capture_\(UUID().uuidString)__"
         let started = ContinuousClock.now
-        captureLogger.notice("capture begin oldCount=\(oldCount) snapshot='\(preview(fallback), privacy: .public)' ax='\(preview(axSelection), privacy: .public)'")
+        captureLogger.notice("capture begin oldCount=\(oldCount) hasClipboard=\(fallback != nil) hasAXSelection=\(axSelection != nil)")
 
         pasteboard.clearContents()
         pasteboard.setString(sentinel, forType: .string)
@@ -71,7 +71,7 @@ private let captureLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "ca
             let count = pasteboard.changeCount
             if count != lastCount {
                 let value = pasteboard.string(forType: .string)
-                captureLogger.notice("changeCount \(lastCount)->\(count) elapsedMs=\(milliseconds(since: started)) entity=external value='\(preview(value), privacy: .public)'")
+                captureLogger.notice("changeCount \(lastCount)->\(count) elapsedMs=\(milliseconds(since: started)) entity=external")
                 lastCount = count
                 if value != sentinel {
                     observed = value
@@ -89,7 +89,7 @@ private let captureLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "ca
             accessibilitySelectedText: axSelection,
             clipboardText: fallback
         )
-        captureLogger.notice("capture decision source=\(decision.source.rawValue, privacy: .public) observed='\(preview(observed), privacy: .public)' elapsedMs=\(milliseconds(since: started))")
+        captureLogger.notice("capture decision source=\(decision.source.rawValue, privacy: .public) elapsedMs=\(milliseconds(since: started))")
 
         let beforeRestore = pasteboard.changeCount
         pasteboard.clearContents()
@@ -114,11 +114,6 @@ private let captureLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "ca
             ? selected as? String
             : nil
         return (text, pidResult == .success ? pid : nil)
-    }
-
-    private static func preview(_ text: String?) -> String {
-        guard let text else { return "<nil>" }
-        return String(text.replacingOccurrences(of: "\n", with: "\\n").prefix(40))
     }
 
     private static func milliseconds(since instant: ContinuousClock.Instant) -> Int64 {
