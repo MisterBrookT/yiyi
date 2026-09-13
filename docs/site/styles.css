@@ -164,7 +164,6 @@ a:focus-visible {
 .secondary:hover {
   background: var(--surface-2);
 }
-.requirements,
 .note {
   margin: 15px 0 0;
   color: var(--muted);
@@ -193,12 +192,6 @@ a:focus-visible {
   display: block;
   width: 100%;
   height: auto;
-}
-.product-frame figcaption {
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
 }
 .story {
   padding-bottom: 150px;
