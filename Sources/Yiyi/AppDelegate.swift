@@ -169,7 +169,7 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                     panel.showNotice(
                         command: command.name,
                         message: "Nothing on the clipboard. Accessibility is not active in this yiyi process.",
-                        hints: "⏎ relaunch yiyi   esc close"
+                        actionTitle: "Relaunch"
                     ) { [weak self] in self?.relaunch() }
                 }
                 return
@@ -244,7 +244,7 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
     private func showStaleGrantNotice() {
         panel.showNotice(command: "Accessibility",
                          message: staleGrantMessage,
-                         hints: "⏎ repair permission   esc later") { [weak self] in self?.repairAccessibilityPermission() }
+                         actionTitle: "Repair Permission") { [weak self] in self?.repairAccessibilityPermission() }
     }
 
     @objc private func openAccessibilitySettings() {

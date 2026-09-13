@@ -203,6 +203,47 @@ import YiyiCore
         }
     }
     try check("confirmation.used", confirmations >= 5)
+    let reading = ResultPanelController(closesOnResign: false)
+    defer { reading.close() }
+    let originalText = "Design is intelligence made visible.\nA quiet interface lets content lead."
+    reading.showLoading(command: "Translate to Chinese", source: originalText)
+    try check("result.loading-no-stale-copy", reading.control("result.copy")?.isHidden == true && reading.textForCopy(useSelection: false).isEmpty)
+    let translated = "设计是可视化的智慧。\n\n安静的界面让内容成为主角。"
+    reading.showResult(translated)
+    try check("result.white-surface", reading.window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua)
+    try check("result.sentence-case-title", (reading.control("result.command") as? NSTextField)?.stringValue == "Translate to Chinese")
+    try check("result.compact", reading.window.frame.width == 440 && reading.window.frame.height < 250)
+    try check("result.original-collapsed", reading.control("result.original")?.isHidden == true)
+    try check("result.real-controls", reading.control("result.close") != nil && reading.control("result.copy")?.isHidden == false)
+    try reading.renderPNG(to: outdir.appendingPathComponent("reading-result.png"))
+    act(reading.control("result.show-original") as! NSButton)
+    let originalEditor = reading.control("result.original") as! NSTextView
+    try check("result.original-full-text", !originalEditor.isHidden && originalEditor.string == originalText)
+    reading.window.makeFirstResponder(originalEditor); originalEditor.setSelectedRange(NSRange(location: 0, length: 6))
+    try check("result.original-selection-copy", reading.textForCopy(useSelection: true) == "Design")
+    act(reading.control("result.show-original") as! NSButton)
+    reading.showResult("**Important**: keep `literal` text.\n\n你好。")
+    let resultEditor = reading.control("result.text") as! NSTextView
+    try check("result.inline-markdown", resultEditor.string == "Important: keep literal text.\n\n你好。")
+    reading.window.makeFirstResponder(resultEditor); resultEditor.setSelectedRange(NSRange(location: 0, length: 9))
+    try check("result.selected-copy", reading.textForCopy(useSelection: true) == "Important")
+    try check("result.full-copy-preserves-format", reading.textForCopy(useSelection: false).hasPrefix("**Important**"))
+    reading.showResult(String(repeating: "A long translation remains scrollable.\n", count: 120))
+    try check("result.long-scrolls", reading.window.frame.height <= 528 && resultEditor.frame.height > 420)
+    var confirmed = false
+    reading.showNotice(command: "Accessibility", message: "Enable selection capture.", actionTitle: "Continue", confirm: { confirmed = true })
+    act(reading.control("result.action") as! NSButton)
+    try check("result.notice-action", confirmed && !reading.window.isVisible)
+    reading.showError(message: "Could not connect", detail: "Diagnostic information")
+    try check("result.error-clears-action", reading.control("result.action")?.isHidden == true && reading.control("result.copy")?.isHidden == true)
+    try check("result.error-details-collapsed", reading.control("result.original")?.isHidden == true)
+    act(reading.control("result.show-original") as! NSButton)
+    try check("result.error-details-available", (reading.control("result.original") as? NSTextView)?.string == "Diagnostic information")
+    try reading.renderPNG(to: outdir.appendingPathComponent("reading-error.png"))
+    reading.close()
+    let otherWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: .titled, backing: .buffered, defer: false)
+    let otherCopy = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: otherWindow.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8)!
+    try check("result.never-steals-settings-copy", reading.handleKey(otherCopy) === otherCopy)
     print("PASS: \(checks.count) AppKit checks")
 }
 

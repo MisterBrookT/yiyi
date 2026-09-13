@@ -10,11 +10,11 @@ python3 scripts/check-site.py
 node scripts/check-site-browser.mjs
 ```
 
-Open <http://localhost:8000>. The browser check needs Node 22+ and Chrome; use `CHROME_BIN` for a nonstandard Chrome executable. It checks desktop/mobile, light/dark, image loading, overflow, 44px targets, keyboard focus, and reduced motion, and prints the screenshot directory.
+Open <http://localhost:8000>. The browser check needs Node 22+ and Chrome; use `CHROME_BIN` for a nonstandard Chrome executable. It checks desktop/mobile under both light and dark OS preferences, verifies that the site remains light-only and always selects light product images, and checks image loading, overflow, 44px targets, keyboard focus, and reduced motion. It prints the screenshot directory.
 
 ## Product images
 
-All PNGs use sanitized, deterministic fixtures from the real app—not user configuration. The settings captures come from `--ui-journey`; result captures use `--preview light|dark --png <path>`. Mobile settings images crop the prompt region so text stays readable. Keep HTML image dimensions in sync; the checker fails on missing assets or mismatched aspect ratios.
+All PNGs use sanitized, deterministic fixtures from the real app—not user configuration. The settings capture comes from `--ui-journey`; the result capture uses `--preview light --png <path>`. The public website intentionally uses only light captures, regardless of the visitor’s OS appearance. The mobile settings image crops the prompt region so text stays readable. Keep HTML image dimensions in sync; the checker fails on missing assets or mismatched aspect ratios.
 
 The original app icon comes from `Resources/AppIcon.icns`. The social preview is 1200×630. Do not put credentials or personal selected text in public captures.
 

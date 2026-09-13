@@ -9,16 +9,7 @@
       content="A quiet macOS menu-bar translator for selected text, powered by your OpenAI-compatible endpoint."
     />
     <link rel="canonical" href="https://misterbrookt.github.io/yiyi/" />
-    <meta
-      name="theme-color"
-      content="#ffffff"
-      media="(prefers-color-scheme: light)"
-    />
-    <meta
-      name="theme-color"
-      content="#0d0d0f"
-      media="(prefers-color-scheme: dark)"
-    />
+    <meta name="theme-color" content="#ffffff" />
     <meta property="og:type" content="website" />
     <meta
       property="og:title"
@@ -53,18 +44,7 @@
       content="https://misterbrookt.github.io/yiyi/assets/social-preview.png"
     />
     <link rel="icon" href="assets/app-icon.png" type="image/png" />
-    <link
-      rel="preload"
-      as="image"
-      href="assets/result-light.png"
-      media="(prefers-color-scheme: light)"
-    />
-    <link
-      rel="preload"
-      as="image"
-      href="assets/result-dark.png"
-      media="(prefers-color-scheme: dark)"
-    />
+    <link rel="preload" as="image" href="assets/result-light.png" />
     <link rel="stylesheet" href="styles.css" />
     <script type="application/ld+json">
       {
@@ -116,22 +96,13 @@
       </section>
 
       <figure class="hero-media wrap-wide">
-        <picture>
-          <source
-            srcset="assets/result-dark.png"
-            media="(prefers-color-scheme: dark)"
-          />
-          <img
-            src="assets/result-light.png"
-            width="840"
-            height="338"
-            alt="yiyi result panel showing a completed translation"
-            fetchpriority="high"
-          />
-        </picture>
-        <figcaption>
-          A focused result panel that gets out of the way.
-        </figcaption>
+        <img
+          src="assets/result-light.png"
+          width="880"
+          height="348"
+          alt="yiyi result panel showing a completed translation"
+          fetchpriority="high"
+        />
       </figure>
 
       <section class="story wrap" id="how" aria-labelledby="how-title">
@@ -180,20 +151,10 @@
         <figure class="product-frame">
           <picture>
             <source
-              srcset="assets/settings-mobile-dark.png"
-              media="(max-width: 720px) and (prefers-color-scheme: dark)"
-              width="708"
-              height="374"
-            />
-            <source
               srcset="assets/settings-mobile-light.png"
               media="(max-width: 720px)"
               width="708"
               height="374"
-            />
-            <source
-              srcset="assets/settings-dark.png"
-              media="(prefers-color-scheme: dark)"
             />
             <img
               src="assets/settings-light.png"

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dependency-free Chrome acceptance: real layout, images, focus, and media queries.
+// Dependency-free Chrome acceptance: real light-only layout under both OS appearance preferences.
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile, mkdir, rm } from "node:fs/promises";
@@ -106,10 +106,10 @@ try {
   await cmd("Page.enable");
   const results = [];
   for (const [name, width, height, scheme] of [
-    ["desktop-light", 1440, 1200, "light"],
-    ["desktop-dark", 1440, 1200, "dark"],
-    ["mobile-light", 390, 844, "light"],
-    ["mobile-dark", 390, 844, "dark"],
+    ["desktop-os-light", 1440, 1200, "light"],
+    ["desktop-os-dark", 1440, 1200, "dark"],
+    ["mobile-os-light", 390, 844, "light"],
+    ["mobile-os-dark", 390, 844, "dark"],
   ]) {
     await cmd("Emulation.setDeviceMetricsOverride", {
       width,
@@ -147,14 +147,25 @@ try {
     if (readiness.exceptionDetails) throw new Error("Page did not load");
     const { result } = await cmd("Runtime.evaluate", {
       returnByValue: true,
-      expression: `JSON.stringify({overflow:document.documentElement.scrollWidth>innerWidth,images:[...document.images].every(i=>i.complete&&i.naturalWidth>0),dark:matchMedia('(prefers-color-scheme:dark)').matches,reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,title:document.title,smallTargets:[...document.querySelectorAll('a')].filter(a=>a.getBoundingClientRect().width>0&&!a.classList.contains('skip-link')).filter(a=>a.getBoundingClientRect().height<44).length})`,
+      expression: `JSON.stringify({overflow:document.documentElement.scrollWidth>innerWidth,images:[...document.images].every(i=>i.complete&&i.naturalWidth>0),osDark:matchMedia('(prefers-color-scheme:dark)').matches,siteBackground:getComputedStyle(document.body).backgroundColor,siteColorScheme:getComputedStyle(document.documentElement).colorScheme,selectedAssets:[...document.images].map(i=>new URL(i.currentSrc).pathname),reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,title:document.title,smallTargets:[...document.querySelectorAll('a')].filter(a=>a.getBoundingClientRect().width>0&&!a.classList.contains('skip-link')).filter(a=>a.getBoundingClientRect().height<44).length})`,
     });
     const state = JSON.parse(result.value);
     if (
       !state.title.startsWith("yiyi") ||
       state.overflow ||
       !state.images ||
-      state.dark !== (scheme === "dark") ||
+      state.osDark !== (scheme === "dark") ||
+      state.siteBackground !== "rgb(255, 255, 255)" ||
+      state.siteColorScheme !== "light" ||
+      state.selectedAssets.some((asset) => asset.includes("-dark")) ||
+      !state.selectedAssets.some((asset) =>
+        asset.endsWith("result-light.png"),
+      ) ||
+      !state.selectedAssets.some((asset) =>
+        asset.includes(
+          width <= 720 ? "settings-mobile-light.png" : "settings-light.png",
+        ),
+      ) ||
       !state.reduced ||
       state.smallTargets
     )
@@ -199,7 +210,7 @@ try {
     JSON.stringify(results, null, 2),
   );
   console.log(
-    `PASS: four Chrome layouts, all images, no overflow, 44px targets, keyboard focus, reduced motion. Artifacts: ${output}`,
+    `PASS: four Chrome layouts stay light-only under both OS appearances; light assets, no overflow, 44px targets, keyboard focus, and reduced motion verified. Artifacts: ${output}`,
   );
 } finally {
   clearTimeout(watchdog);

@@ -49,9 +49,12 @@ for image in parser.images:
 for key in ["description", "og:title", "og:description", "og:url", "og:image", "twitter:card"]:
     if not parser.meta.get(key): errors.append(f"missing metadata: {key}")
 text = html_path.read_text(encoding="utf-8")
-for required in ['rel="canonical"', 'application/ld+json', 'prefers-reduced-motion', 'Skip to content']:
-    corpus = text + (SITE / "styles.css").read_text(encoding="utf-8")
+styles = (SITE / "styles.css").read_text(encoding="utf-8")
+corpus = text + styles
+for required in ['rel="canonical"', 'application/ld+json', 'prefers-reduced-motion', 'Skip to content', 'color-scheme: light']:
     if required not in corpus: errors.append(f"missing required feature: {required}")
+for forbidden in ['prefers-color-scheme: dark', 'result-dark.png', 'settings-dark.png', 'settings-mobile-dark.png', 'color-scheme: light dark']:
+    if forbidden in corpus: errors.append(f"light-only site contains forbidden dark variant: {forbidden}")
 print(f"Checked {html_path.relative_to(ROOT)}: {len(parser.refs)} references, {len(parser.ids)} anchors")
 social = SITE / 'assets/social-preview.png'
 if not social.is_file() or struct.unpack('>II', social.read_bytes()[16:24]) != (1200, 630):
@@ -59,4 +62,4 @@ if not social.is_file() or struct.unpack('>II', social.read_bytes()[16:24]) != (
 if errors:
     print("ERRORS:\n- " + "\n- ".join(errors), file=sys.stderr)
     raise SystemExit(1)
-print("PASS: links, anchors, all local assets, image dimensions, and metadata are valid")
+print("PASS: links, anchors, light-only assets, image dimensions, and metadata are valid")
