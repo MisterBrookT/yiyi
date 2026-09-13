@@ -61,9 +61,16 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+    <div class="scenery" aria-hidden="true">
+      <span class="glow glow-a"></span>
+      <span class="glow glow-b"></span>
+      <span class="glow glow-c"></span>
+      <span class="grain"></span>
+    </div>
+
     <header class="site-header wrap">
       <a class="brand" href="#top" aria-label="yiyi home"
-        ><img src="assets/app-icon.png" width="32" height="32" alt="" /><span
+        ><img src="assets/app-icon.png" width="28" height="28" alt="" /><span
           >yiyi</span
         ></a
       >
@@ -75,20 +82,18 @@
 
     <main id="main">
       <section class="hero wrap" id="top">
-        <p class="eyebrow">Native menu-bar translator for macOS</p>
         <h1>Translate what you select.<br />Stay where you are.</h1>
         <p class="lede">
-          Run a saved translation command from any app with a keyboard shortcut,
-          Hyper Key, or an optional pointer hold. yiyi sends the text to the
-          OpenAI-compatible endpoint you choose.
+          A quiet menu-bar translator for macOS, running on the model you
+          choose.
         </p>
         <div class="actions">
           <a
             class="button primary"
             href="https://github.com/MisterBrookT/yiyi#install"
-            >Get yiyi on GitHub</a
+            >Get yiyi</a
           >
-          <a class="button secondary" href="#how">See how it works</a>
+          <a class="button secondary" href="#how">How it works</a>
         </div>
       </section>
 
@@ -103,49 +108,24 @@
       </figure>
 
       <section class="story wrap" id="how" aria-labelledby="how-title">
-        <div class="section-copy">
-          <p class="eyebrow">How it works</p>
-          <h2 id="how-title">One command, any selected text</h2>
-          <p>
-            Select text in the app you are using, invoke yiyi, then read or copy
-            the result. Accessibility permission enables selection capture;
-            without it, clipboard-based commands remain available.
-          </p>
-        </div>
+        <h2 id="how-title" class="visually-hidden">How it works</h2>
         <ol class="steps">
-          <li>
-            <span>01</span><strong>Select</strong>
-            <p>Highlight the words you want to translate.</p>
-          </li>
-          <li>
-            <span>02</span><strong>Invoke</strong>
-            <p>
-              Use a keyboard shortcut, Hyper Key, or the optional pointer
-              gesture.
-            </p>
-          </li>
-          <li>
-            <span>03</span><strong>Continue</strong>
-            <p>
-              Read the result in a compact native panel and return to your work.
-            </p>
-          </li>
+          <li><span>01</span><strong>Select</strong></li>
+          <li><span>02</span><strong>Invoke</strong></li>
+          <li><span>03</span><strong>Keep reading</strong></li>
         </ol>
       </section>
 
       <section class="feature split wrap-wide" aria-labelledby="commands-title">
         <div class="section-copy sticky-copy">
-          <p class="eyebrow">Your commands</p>
-          <h2 id="commands-title">Make translation fit the task</h2>
+          <h2 id="commands-title">Your prompts, your commands.</h2>
           <p>
-            Save commands with their own name, shortcut, and prompt. Insert
-            <code>{selection}</code> for selected text or
-            <code>{clipboard}</code> when the clipboard is the intended input.
-            Review everything before Save; Cancel leaves the active setup
-            unchanged.
+            Give each command a name, a shortcut, and a prompt. Insert
+            <code>{selection}</code> or <code>{clipboard}</code> where the text
+            should go.
           </p>
         </div>
-        <figure class="product-frame">
+        <figure class="product-frame wrap-mid">
           <picture>
             <source
               srcset="assets/settings-mobile-light.png"
@@ -166,13 +146,8 @@
 
       <section class="feature gesture wrap" aria-labelledby="gesture-title">
         <div class="section-copy">
-          <p class="eyebrow">More than keys</p>
-          <h2 id="gesture-title">Hold, then release</h2>
-          <p>
-            As an experimental, opt-in trigger, hold Option and the primary
-            mouse or trackpad click for 0.45 seconds, then release. Moving to
-            drag cancels the gesture, so ordinary selection stays ordinary.
-          </p>
+          <h2 id="gesture-title">Or never touch the keyboard.</h2>
+          <p>Hold Option and click for a moment, then release.</p>
         </div>
         <div
           class="gesture-demo"
@@ -183,54 +158,17 @@
         </div>
       </section>
 
-      <section class="details wrap" aria-labelledby="details-title">
-        <div class="section-copy">
-          <p class="eyebrow">A small native tool</p>
-          <h2 id="details-title">Only the controls that matter</h2>
-        </div>
-        <div class="detail-grid">
-          <article>
-            <h3>Your endpoint</h3>
-            <p>
-              Enter a Base URL, API key, and model for an OpenAI-compatible
-              service. Text is sent to that chosen endpoint.
-            </p>
-          </article>
-          <article>
-            <h3>Local configuration</h3>
-            <p>
-              Commands and credentials stay in local configuration. Inline keys
-              are plaintext in an owner-only file, not Keychain. Captured text
-              is not written to diagnostic logs.
-            </p>
-          </article>
-          <article>
-            <h3>Keyboard or Hyper Key</h3>
-            <p>
-              Use an ordinary modifier shortcut, a right-side leader key, or an
-              existing external ⌃⌥⇧⌘ remap.
-            </p>
-          </article>
-          <article>
-            <h3>Native and dependency-free</h3>
-            <p>
-              Built entirely with macOS frameworks, so it starts instantly and
-              stays out of the way.
-            </p>
-          </article>
-        </div>
-      </section>
-
       <section class="closing wrap" aria-labelledby="closing-title">
         <h2 id="closing-title">Translation, without changing context.</h2>
-        <p>
-          Connect your endpoint, choose how to invoke it, and keep reading where
-          you are.
-        </p>
+        <ul class="facts">
+          <li>Free and open source</li>
+          <li>Your own endpoint</li>
+          <li>Native macOS</li>
+        </ul>
         <a
           class="button primary"
           href="https://github.com/MisterBrookT/yiyi#install"
-          >Get yiyi on GitHub</a
+          >Get yiyi</a
         >
       </section>
     </main>
