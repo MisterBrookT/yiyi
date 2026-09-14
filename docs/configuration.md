@@ -11,7 +11,7 @@ API key lookup order:
 3. That variable in `~/.config/yiyi/.env`.
 4. `~/.config/yiyi/apikey`, for the default connection only.
 
-An empty key field leaves the existing key unchanged. To remove an inline key, remove its `apiKey` entry through General → Advanced → Edit config file, then reload. Other key sources still apply. The JSON file is mode `0600`; keys are not encrypted. Keep `.env` and `apikey` owner-readable only too.
+The key field shows the inline key from the config file, masked, with a reveal button. Clearing it and saving removes the inline key; other key sources still apply. Keys that come from the environment or key files are not shown in the field, but the line beneath it says which source is in use. The JSON file is mode `0600`; keys are not encrypted. Keep `.env` and `apikey` owner-readable only too.
 
 Each connection has an `apiStyle`: `openai` (default, omitted from the file) or `anthropic`. OpenAI-style connections post to `<baseURL>/chat/completions` with a Bearer token; Anthropic connections post to `<baseURL>/messages` with `x-api-key` and `anthropic-version: 2023-06-01`. Switching the API in Settings swaps the base URL only when it still equals the other protocol's public default.
 

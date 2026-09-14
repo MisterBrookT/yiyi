@@ -25,6 +25,7 @@ private enum SettingsPane: String, CaseIterable {
     private var shortcutModes: [Int: Bool] = [:]
     private var closingAfterDiscard = false
     private var keyWasEntered = false
+    private var keyRevealed = false
     private var approvedKeyDestination: String?
     private let accessibilityStatus: () -> AccessibilityStatus
     private let requestAccessibility: () -> Void
@@ -229,11 +230,20 @@ private enum SettingsPane: String, CaseIterable {
         guard let provider = configs.config.providers[selectedProvider] else {
             return label("The saved connection is missing. Reload your configuration in General → Advanced.", secondary: true)
         }
-        let key = NSSecureTextField(string: "")
-        style(key); key.placeholderString = configs.providerAvailability(selectedProvider).usable ? "Leave unchanged" : "API key"
-        key.identifier = NSUserInterfaceItemIdentifier("provider.api-key"); key.setAccessibilityIdentifier("provider.api-key"); key.target = self; key.action = #selector(commitField(_:)); stretch(key)
+        // What you see is what is saved: the field shows the inline key from the config file, masked
+        // by default with a reveal toggle. Keys that come from the environment or key files are not
+        // shown here because they are not ours to edit; the status line says where they came from.
+        let savedKey = fieldDrafts["provider.api-key"] ?? provider.apiKey ?? ""
+        let key: NSTextField = keyRevealed ? NSTextField(string: savedKey) : NSSecureTextField(string: savedKey)
+        style(key); key.placeholderString = "Paste your API key"
+        key.identifier = NSUserInterfaceItemIdentifier("provider.api-key"); key.setAccessibilityIdentifier("provider.api-key"); key.target = self; key.action = #selector(commitField(_:))
+        let reveal = NSButton(image: NSImage(systemSymbolName: keyRevealed ? "eye.slash" : "eye", accessibilityDescription: keyRevealed ? "Hide key" : "Show key")!, target: self, action: #selector(toggleKeyReveal))
+        reveal.bezelStyle = .rounded; reveal.isBordered = false; reveal.toolTip = keyRevealed ? "Hide key" : "Show key"; reveal.setAccessibilityIdentifier("provider.api-key-reveal")
+        reveal.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        let keyRow = NSStackView(views: [key, reveal]); keyRow.orientation = .horizontal; keyRow.spacing = 4
+        key.setContentHuggingPriority(.defaultLow, for: .horizontal); stretch(keyRow)
         let ready = configs.providerAvailability(selectedProvider).usable
-        let status = label(ready ? "API key available" : "Enter the key supplied by your server.", secondary: true)
+        let status = label(keySourceDescription(), secondary: true)
         status.maximumNumberOfLines = 0; status.usesSingleLineMode = false; status.lineBreakMode = .byWordWrapping
         status.preferredMaxLayoutWidth = controlWidth
         if !ready { status.textColor = Theme.attention }
@@ -246,7 +256,7 @@ private enum SettingsPane: String, CaseIterable {
         prosePlaceholder(provider.apiStyle == .anthropic ? "claude-sonnet-4-5" : "Model name from your server", in: model)
         let style = popup(APIStyle.allCases.map(\.displayName), selected: provider.apiStyle.displayName, id: "provider.api-style", action: #selector(providerStyle(_:)))
         style.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
-        var rows = [row("API", style), row("Base URL", baseURL), row("API key", key), row("", status), row("Model", model)]
+        var rows = [row("API", style), row("Base URL", baseURL), row("API key", keyRow), row("", status), row("Model", model)]
         rows.append(advancedToggle("provider"))
         if expandedAdvanced.contains("provider") {
             let env = field(provider.apiKeyEnv, id: "provider.api-key-env", mono: true)
@@ -486,6 +496,21 @@ private enum SettingsPane: String, CaseIterable {
         window?.initialFirstResponder = controls.first
     }
 
+    @objc private func toggleKeyReveal() {
+        if let field = control(accessibilityID: "provider.api-key") as? NSTextField,
+           field.stringValue != (configs.config.providers[selectedProvider]?.apiKey ?? "") { fieldDrafts["provider.api-key"] = field.stringValue }
+        keyRevealed.toggle(); rebuild()
+    }
+    /// Plain-language origin of the key that will actually be sent.
+    private func keySourceDescription() -> String {
+        guard let provider = configs.config.providers[selectedProvider] else { return "" }
+        if let key = provider.apiKey, !key.isEmpty { return "Saved in yiyi's config file." }
+        let raw = liveConfigs.apiKeyStatus(for: selectedProvider)
+        if raw.contains("environment") { return "Using $\(provider.apiKeyEnv) from your environment." }
+        if raw.contains(".env") { return "Using \(provider.apiKeyEnv) from ~/.config/yiyi/.env." }
+        if raw.contains("apikey") { return "Using the key in ~/.config/yiyi/apikey." }
+        return "No API key yet. Paste the key supplied by your server."
+    }
     @objc private func providerStyle(_ sender: NSPopUpButton) {
         guard let name = sender.identifier?.rawValue, let title = sender.titleOfSelectedItem,
               let value = APIStyle.allCases.first(where: { $0.displayName == title }),
@@ -610,9 +635,12 @@ private enum SettingsPane: String, CaseIterable {
             case "provider.api-key-env": try configs.setProvider(selectedProvider, apiKeyEnv: sender.stringValue)
             case "provider.model": try configs.setProvider(selectedProvider, model: sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
             case "provider.api-key":
-                if !sender.stringValue.isEmpty {
-                    try configs.setProvider(selectedProvider, apiKey: .some(sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)))
-                    keyWasEntered = true
+                let entered = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                let previous = configs.config.providers[selectedProvider]?.apiKey ?? ""
+                if entered != previous {
+                    // Clearing the field removes the inline key; other key sources still apply.
+                    try configs.setProvider(selectedProvider, apiKey: .some(entered.isEmpty ? nil : entered))
+                    keyWasEntered = !entered.isEmpty
                 }
             case "provider.temperature": try configs.setProvider(selectedProvider, temperature: .some(try validateTemperature(sender.stringValue)))
             default:
@@ -632,11 +660,9 @@ private enum SettingsPane: String, CaseIterable {
             chooser.item(at: selectedCommand)?.title = configs.config.commands[selectedCommand].name
         }
         if id == "provider.api-key" {
-            sender.stringValue = ""
-            sender.placeholderString = "Leave unchanged"
             let ready = configs.providerAvailability(selectedProvider).usable
             let status = control(accessibilityID: "provider.key-status") as? NSTextField
-            status?.stringValue = ready ? "API key available" : "Enter the key supplied by your server."
+            status?.stringValue = keySourceDescription()
             status?.textColor = ready ? .secondaryLabelColor : Theme.attention
             status?.setAccessibilityValue(ready ? "ready" : "missing")
         }
