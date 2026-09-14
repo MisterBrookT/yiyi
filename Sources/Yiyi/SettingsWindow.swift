@@ -292,7 +292,7 @@ private enum SettingsPane: String, CaseIterable {
             let isHyper = command.hotkey.hasPrefix("super+") || command.hotkey.hasPrefix("hyper+")
             let hasHyperKey = superKey != .none
             let chord = HotkeyRecorder(value: isHyper ? "" : command.hotkey, mode: .chord); chord.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; chord.setAccessibilityIdentifier("command.\(index).hotkey")
-            let keyboardRow = triggerRow(image: inputDeckImage(pressedKeys: ["⌘", "⇧", "T"], fingerOnTrackpad: false, size: deckThumb), control: chord, note: isHyper ? "Recording here replaces the Hyper Key shortcut." : "Press a key combination.")
+            let keyboardRow = triggerRow(symbol: "keyboard", control: chord, note: isHyper ? "Replaces the Hyper Key shortcut." : "")
 
             let hyperKey = HotkeyRecorder(value: isHyper ? command.hotkey : "", mode: .superKey); hyperKey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hyperKey.setAccessibilityIdentifier("command.\(index).hyper-hotkey")
             hyperKey.isEnabled = hasHyperKey
@@ -301,28 +301,29 @@ private enum SettingsPane: String, CaseIterable {
             hyper.widthAnchor.constraint(equalToConstant: 168).isActive = true
             let hyperControls = NSStackView(views: [hyperKey, hyper]); hyperControls.orientation = .horizontal; hyperControls.spacing = 10
             let hyperNote: String = switch superKey {
-                case .none: "Choose a Hyper Key, then record a single key."
-                case .externalHyper: "Record a single key; fires with your external ⌃⌥⇧⌘."
-                default: isHyper ? "Hold \(superKey.displayName), tap the key." : "Record a single key to use with \(superKey.displayName)."
+                case .none: "Choose a Hyper Key first."
+                case .externalHyper: "Single key, with your external ⌃⌥⇧⌘."
+                default: isHyper ? "" : "Single key, held with \(superKey.displayName)."
             }
-            let hyperRow = triggerRow(image: inputDeckImage(pressedKeys: ["⌘"], fingerOnTrackpad: false, size: deckThumb, rightSide: true), control: hyperControls, note: hyperNote)
+            let hyperRow = triggerRow(symbol: "command", control: hyperControls, note: hyperNote)
 
             let ownsPointer = configs.config.pointerTrigger.enabled && configs.config.pointerTrigger.commandIndex == index
-            let hold = NSButton(checkboxWithTitle: "Press and hold runs this command", target: self, action: #selector(changePointerOwner(_:))); hold.tag = index
+            let hold = NSButton(checkboxWithTitle: "Press and hold to run this command", target: self, action: #selector(changePointerOwner(_:))); hold.tag = index
             hold.state = ownsPointer ? .on : .off; hold.setAccessibilityIdentifier("command.\(index).pointer")
-            var holdNote = "Select text, press the trackpad or mouse button and hold still for half a second. One command at a time; clicks and drags are unchanged."
+            hold.toolTip = "Select text, then press the trackpad or mouse button and hold still for half a second. Clicks and drags are unchanged."
+            var holdNote = ""
             if configs.config.pointerTrigger.enabled && !ownsPointer, configs.config.commands.indices.contains(configs.config.pointerTrigger.commandIndex) {
-                holdNote = "Currently runs “\(configs.config.commands[configs.config.pointerTrigger.commandIndex].name)”. Check to move it here."
+                holdNote = "Currently runs “\(configs.config.commands[configs.config.pointerTrigger.commandIndex].name)”."
             } else if ownsPointer {
                 holdNote = configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save."
             }
-            var holdViews: [NSView] = [hold]
+            var permission: NSView?
             if ownsPointer {
-                let permission = NSButton(title: "Input Monitoring…", target: self, action: #selector(openInputMonitoring)); permission.controlSize = .small; permission.font = .systemFont(ofSize: 11); permission.bezelStyle = .rounded
-                holdViews.append(permission)
+                let link = NSButton(title: "Input Monitoring…", target: self, action: #selector(openInputMonitoring))
+                link.isBordered = false; link.font = .systemFont(ofSize: 11); link.contentTintColor = .linkColor
+                permission = link
             }
-            let holdControls = NSStackView(views: holdViews); holdControls.orientation = .horizontal; holdControls.spacing = 10
-            let trackpadRow = triggerRow(image: inputDeckImage(pressedKeys: [], fingerOnTrackpad: true, size: deckThumb), control: holdControls, note: holdNote)
+            let trackpadRow = triggerRow(symbol: "hand.tap", control: hold, note: holdNote, trailing: permission)
             let prompt = NSTextView(frame: NSRect(x: 0, y: 0, width: formWidth - 2, height: 188))
             prompt.string = promptDrafts[index] ?? command.prompt
             if let range = promptSelections[index], NSMaxRange(range) <= (prompt.string as NSString).length { prompt.setSelectedRange(range) }
@@ -422,19 +423,25 @@ private enum SettingsPane: String, CaseIterable {
         appendError(for: "general", to: &rows)
         return section("General", rows: rows)
     }
-    private var deckThumb: NSSize { NSSize(width: 96, height: 54) }
-    /// Picture · control · one-line note. The picture is the website's deck illustration, so the
-    /// trigger is recognisable before reading.
-    private func triggerRow(image: NSImage, control: NSView, note: String) -> NSView {
-        let picture = NSImageView(image: image); picture.imageScaling = .scaleProportionallyDown
-        picture.widthAnchor.constraint(equalToConstant: image.size.width).isActive = true
-        picture.heightAnchor.constraint(equalToConstant: image.size.height).isActive = true
-        let text = label(note, secondary: true); text.font = .systemFont(ofSize: 11)
-        text.maximumNumberOfLines = 0; text.usesSingleLineMode = false; text.lineBreakMode = .byWordWrapping
-        text.preferredMaxLayoutWidth = controlWidth - image.size.width - 14
-        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let right = column([control, text], spacing: 5)
-        let block = NSStackView(views: [picture, right]); block.orientation = .horizontal; block.spacing = 14; block.alignment = .top
+    /// Symbol · control · optional one-line note. Symbols adapt to dark mode; the website's deck
+    /// pictures did not read well at this size.
+    private func triggerRow(symbol: String, control: NSView, note: String, trailing: NSView? = nil) -> NSView {
+        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!.withSymbolConfiguration(.init(pointSize: 15, weight: .regular))!)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        var lines: [NSView] = [control]
+        if !note.isEmpty || trailing != nil {
+            let text = label(note, secondary: true); text.font = .systemFont(ofSize: 11)
+            text.maximumNumberOfLines = 1; text.lineBreakMode = .byTruncatingTail
+            var noteViews: [NSView] = [text]
+            if let trailing { noteViews.append(trailing) }
+            let noteRow = NSStackView(views: noteViews); noteRow.orientation = .horizontal; noteRow.spacing = 10
+            lines.append(noteRow)
+        }
+        let right = column(lines, spacing: 4)
+        let block = NSStackView(views: [icon, right]); block.orientation = .horizontal; block.spacing = 10; block.alignment = .top
+        icon.topAnchor.constraint(equalTo: block.topAnchor, constant: 2).isActive = true
         block.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true
         return block
     }
