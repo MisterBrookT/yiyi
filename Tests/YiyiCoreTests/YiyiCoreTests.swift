@@ -586,28 +586,37 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(YiyiConfig.self, from: JSONEncoder().encode(config)), config)
     }
 
-    func testPointerHoldDispatchesOnceOnQualifyingRelease() {
+    func testPointerHoldFiresWhileStillPressedAndReleaseIsInert() {
         var gesture = PointerGestureRecognizer(enabled: true)
         XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
-        XCTAssertFalse(gesture.consume(pointer(.moved, 0.46, 6, 0)))
-        XCTAssertTrue(gesture.consume(pointer(.primaryUp, 0.50, 6, 0)))
-        XCTAssertFalse(gesture.consume(pointer(.primaryUp, 0.70, 6, 0)))
+        XCTAssertTrue(gesture.isTracking)
+        XCTAssertFalse(gesture.consume(pointer(.moved, 0.2, 6, 0)))
+        XCTAssertTrue(gesture.consume(pointer(.held, 0.45, 6, 0)))
+        XCTAssertFalse(gesture.isTracking)
+        XCTAssertFalse(gesture.consume(pointer(.held, 0.9, 6, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1.2, 6, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.held, 1.3, 6, 0)))
     }
 
-    func testPointerHoldRejectsEarlyRelease() {
+    func testPointerHoldRejectsEarlyTickAndEarlyRelease() {
         var gesture = PointerGestureRecognizer(enabled: true)
         XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.held, 0.44, 0, 0)))
         XCTAssertFalse(gesture.consume(pointer(.primaryUp, 0.44, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.held, 0.46, 0, 0)))
     }
 
     func testPointerHoldCancelsForTravelAndLatchesUntilRelease() {
         var gesture = PointerGestureRecognizer(enabled: true)
         XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
         XCTAssertFalse(gesture.consume(pointer(.moved, 0.2, 8.01, 0)))
+        XCTAssertFalse(gesture.isTracking)
+        XCTAssertFalse(gesture.consume(pointer(.held, 0.45, 8.01, 0)))
         XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0.3, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.held, 1, 0, 0)))
         XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1, 0, 0)))
         XCTAssertFalse(gesture.consume(pointer(.primaryDown, 2, 0, 0)))
-        XCTAssertTrue(gesture.consume(pointer(.primaryUp, 2.45, 0, 0)))
+        XCTAssertTrue(gesture.consume(pointer(.held, 2.45, 0, 0)))
     }
 
     func testPointerHoldCancelsForLostModifierAndExtraButton() {
@@ -618,17 +627,21 @@ final class YiyiCoreTests: XCTestCase {
             var gesture = PointerGestureRecognizer(enabled: true)
             XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
             XCTAssertFalse(gesture.consume(cancellation))
+            XCTAssertFalse(gesture.consume(pointer(.held, 1, 0, 0)))
             XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1, 0, 0)))
         }
+        var released = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(released.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(released.consume(pointer(.held, 0.5, 0, 0, modifier: false)))
     }
 
     func testPointerHoldRequiresModifierAndRespectsDisabledState() {
         var disabled = PointerGestureRecognizer()
         XCTAssertFalse(disabled.consume(pointer(.primaryDown, 0, 0, 0)))
-        XCTAssertFalse(disabled.consume(pointer(.primaryUp, 1, 0, 0)))
+        XCTAssertFalse(disabled.consume(pointer(.held, 1, 0, 0)))
         var missingModifier = PointerGestureRecognizer(enabled: true)
         XCTAssertFalse(missingModifier.consume(pointer(.primaryDown, 0, 0, 0, modifier: false)))
-        XCTAssertFalse(missingModifier.consume(pointer(.primaryUp, 1, 0, 0)))
+        XCTAssertFalse(missingModifier.consume(pointer(.held, 1, 0, 0)))
     }
 
     private func pointer(_ kind: PointerGestureEvent.Kind, _ time: TimeInterval, _ x: Double, _ y: Double, modifier: Bool = true) -> PointerGestureEvent {

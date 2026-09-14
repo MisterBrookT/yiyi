@@ -229,10 +229,8 @@ a:focus-visible {
 }
 .hero-media img {
   display: block;
-  width: min(680px, 100%);
+  width: min(1012px, 100%);
   height: auto;
-  filter: drop-shadow(0 2px 4px rgb(16 16 18 / 0.06))
-    drop-shadow(0 22px 44px rgb(16 16 18 / 0.13));
 }
 .product-frame picture {
   display: block;
@@ -429,7 +427,6 @@ code {
   }
   .hero-media img {
     width: 100%;
-    filter: drop-shadow(0 12px 20px rgb(16 16 18 / 0.1));
   }
   .story {
     padding-bottom: 96px;

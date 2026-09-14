@@ -9,6 +9,10 @@ import YiyiCore
     private var recognizer = PointerGestureRecognizer()
     private var config = PointerTriggerConfig()
     private var selectionSnapshot: String?
+    private var holdGeneration = 0
+    private var holdPending = false
+    private var lastLocation = CGPoint.zero
+    private var lastOptionHeld = false
 
     var onTrigger: ((Int, String?) -> Void)?
     private(set) var status = "Off"
@@ -53,6 +57,7 @@ import YiyiCore
         if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
         source = nil
         tap = nil
+        holdGeneration += 1; holdPending = false
         selectionSnapshot = nil
         recognizer.configure(enabled: false)
         status = "Off"
@@ -60,12 +65,24 @@ import YiyiCore
 
     func consumeForTesting(_ event: PointerGestureEvent, snapshot: String? = nil) {
         if event.kind == .primaryDown { selectionSnapshot = snapshot }
+        lastLocation = CGPoint(x: event.x, y: event.y); lastOptionHeld = event.modifierHeld
         if recognizer.consume(event) {
             let selected = selectionSnapshot
             selectionSnapshot = nil
             onTrigger?(config.commandIndex, selected)
         } else if event.kind == .primaryUp || event.kind == .cancel {
             selectionSnapshot = nil
+        }
+        guard recognizer.isTracking else { holdGeneration += 1; holdPending = false; return }
+        guard !holdPending, event.kind == .primaryDown else { return }
+        // Fire while the button is still down: the user sees the command start, then lets go.
+        holdGeneration += 1; holdPending = true
+        let generation = holdGeneration
+        let tick = event.timestamp + PointerGestureRecognizer.minimumDuration + 0.001
+        DispatchQueue.main.asyncAfter(deadline: .now() + PointerGestureRecognizer.minimumDuration + 0.02) { [weak self] in
+            guard let self, self.holdGeneration == generation else { return }
+            self.holdPending = false
+            self.consumeForTesting(PointerGestureEvent(kind: .held, timestamp: tick, x: self.lastLocation.x, y: self.lastLocation.y, modifierHeld: self.lastOptionHeld))
         }
     }
 
@@ -76,7 +93,10 @@ import YiyiCore
             status = "Interrupted — reopen Settings to retry"
             return
         }
-        if type == .flagsChanged && optionHeld { return }
+        if type == .flagsChanged {
+            lastOptionHeld = optionHeld
+            if optionHeld { return }
+        }
         let kind: PointerGestureEvent.Kind
         switch type {
         case .leftMouseDown: kind = .primaryDown

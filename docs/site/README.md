@@ -14,7 +14,7 @@ Open <http://localhost:8000>. The browser check needs Node 22+ and Chrome; use `
 
 ## Product images
 
-All PNGs use sanitized, deterministic fixtures from the real app—not user configuration. The settings capture comes from `--ui-journey`; the result capture uses `--preview light --png <path>`. The public website intentionally uses only light captures, regardless of the visitor’s OS appearance. The mobile settings image crops the prompt region so text stays readable. Keep HTML image dimensions in sync; the checker fails on missing assets or mismatched aspect ratios.
+All PNGs use sanitized, deterministic fixtures from the real app—not user configuration. The settings capture comes from `--ui-journey`; the hero scene uses `--preview light --scene <path>`, which renders a fixture reading window, a highlighted selection, and the live result panel as one padded image; `--preview light --png <path>` still captures the bare panel. The public website intentionally uses only light captures, regardless of the visitor’s OS appearance. The mobile settings image crops the prompt region so text stays readable. Keep HTML image dimensions in sync; the checker fails on missing assets or mismatched aspect ratios.
 
 The original app icon comes from `Resources/AppIcon.icns`. The social preview is 1200×630. Do not put credentials or personal selected text in public captures.
 

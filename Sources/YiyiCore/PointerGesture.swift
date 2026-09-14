@@ -18,7 +18,9 @@ public struct PointerTriggerConfig: Codable, Equatable, Sendable {
 }
 
 public struct PointerGestureEvent: Equatable, Sendable {
-    public enum Kind: Equatable, Sendable { case primaryDown, moved, primaryUp, cancel }
+    /// `.held` is a clock tick posted by the caller once the minimum duration has elapsed
+    /// since the press; it carries the current pointer location and modifier state.
+    public enum Kind: Equatable, Sendable { case primaryDown, moved, held, primaryUp, cancel }
     public let kind: Kind
     public let timestamp: TimeInterval
     public let x: Double
@@ -35,12 +37,15 @@ public struct PointerGestureEvent: Equatable, Sendable {
 }
 
 /// Recognizes one deliberate Option-primary-button hold while leaving event delivery to the caller.
+/// The gesture fires while the button is still down, so the user sees the command start and
+/// then lets go; the release afterwards is inert.
 public struct PointerGestureRecognizer: Sendable {
     public static let minimumDuration: TimeInterval = 0.45
     public static let maximumTravel = 8.0
 
     private var enabled = false
     private var start: PointerGestureEvent?
+    private var fired = false
     private var cancelledUntilRelease = false
 
     public init(enabled: Bool = false) { self.enabled = enabled }
@@ -48,10 +53,14 @@ public struct PointerGestureRecognizer: Sendable {
     public mutating func configure(enabled: Bool) {
         self.enabled = enabled
         start = nil
+        fired = false
         cancelledUntilRelease = false
     }
 
-    /// Returns true once, on release, when the complete gesture qualifies.
+    /// True while a press is pending and a `.held` tick should be scheduled by the caller.
+    public var isTracking: Bool { start != nil && !fired }
+
+    /// Returns true exactly once per press, on the first `.held` tick that qualifies.
     public mutating func consume(_ event: PointerGestureEvent) -> Bool {
         guard enabled else { return false }
         switch event.kind {
@@ -59,23 +68,29 @@ public struct PointerGestureRecognizer: Sendable {
             guard !cancelledUntilRelease else { return false }
             guard event.modifierHeld else { cancel(); return false }
             start = event
+            fired = false
         case .moved:
-            guard let start else { return false }
+            guard let start, !fired else { return false }
             guard event.modifierHeld, distance(from: start, to: event) <= Self.maximumTravel else { cancel(); return false }
+        case .held:
+            guard let start, !fired, !cancelledUntilRelease, event.modifierHeld,
+                  distance(from: start, to: event) <= Self.maximumTravel,
+                  event.timestamp - start.timestamp >= Self.minimumDuration - 0.0005 else { return false }
+            fired = true
+            return true
         case .cancel:
             if start != nil || cancelledUntilRelease { cancel() }
         case .primaryUp:
-            defer { start = nil; cancelledUntilRelease = false }
-            guard !cancelledUntilRelease, let start, event.modifierHeld,
-                  distance(from: start, to: event) <= Self.maximumTravel,
-                  event.timestamp - start.timestamp >= Self.minimumDuration else { return false }
-            return true
+            start = nil
+            fired = false
+            cancelledUntilRelease = false
         }
         return false
     }
 
     private mutating func cancel() {
         start = nil
+        fired = false
         cancelledUntilRelease = true
     }
 

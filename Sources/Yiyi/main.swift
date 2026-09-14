@@ -124,6 +124,10 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--translate" {
             let point = CGPoint(x: screen.visibleFrame.maxX - 1, y: screen.frame.height - screen.visibleFrame.minY - 1)
             CGWarpMouseCursorPosition(point)
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--scene"), CommandLine.arguments.indices.contains(index + 1) {
+            do { try renderScenePreview(panel: preview, to: URL(fileURLWithPath: CommandLine.arguments[index + 1])); exit(0) }
+            catch { fputs("yiyi scene png: \(error.localizedDescription)\n", stderr); exit(1) }
+        }
         preview.showLoading(command: "Translate to Chinese", source: "Design is intelligence made visible. A quiet interface lets content lead.")
         preview.showResult("设计是可视化的智慧。\n\n安静的界面让内容成为主角。")
         if let index = CommandLine.arguments.firstIndex(of: "--png"), CommandLine.arguments.indices.contains(index + 1) {

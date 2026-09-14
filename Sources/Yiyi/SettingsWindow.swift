@@ -359,7 +359,7 @@ private enum SettingsPane: String, CaseIterable {
         if configs.config.pointerTrigger.enabled {
             let command = popup(configs.config.commands.map(\.name), selected: "", id: "pointer.command", action: #selector(changePointerCommand(_:)))
             command.selectItem(at: configs.config.pointerTrigger.commandIndex)
-            let help = label("Hold ⌥ and the primary button for half a second, then release without dragging. Uses the selection at press time, or the clipboard. Normal clicks are unchanged.", secondary: true)
+            let help = label("Hold ⌥ and the primary button still for half a second; the command starts while you hold. Uses the selection at press time, or the clipboard. Normal clicks are unchanged.", secondary: true)
             stretch(help)
             rows += [row("Run command", command), row("", help), row("Gesture status", label(configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save", secondary: true))]
             let permission = NSButton(title: "Input Monitoring Settings…", target: self, action: #selector(openInputMonitoring))

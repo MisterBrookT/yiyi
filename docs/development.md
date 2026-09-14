@@ -26,7 +26,7 @@ This exercises real AppKit controls and isolated file persistence: staged edits,
 dist/yiyi.app/Contents/MacOS/yiyi --selftest-pointer
 ```
 
-This optional OS check requires the event-tap permissions. It opens a disposable window and posts ordinary clicks, short holds, dragging, and a valid hold-release to that window. It verifies real event-tap dispatch and press-time selection, then closes. Do not move the pointer or change focus while it runs. It never reads or writes clipboard contents.
+This optional OS check requires the event-tap permissions. It opens a disposable window and posts ordinary clicks, short holds, dragging, and a valid still hold to that window. It checks that the command fires while the button is still held and that the release is inert. It verifies real event-tap dispatch and press-time selection, then closes. Do not move the pointer or change focus while it runs. It never reads or writes clipboard contents.
 
 `--selftest-superkey` tests leader matching after creating a real event tap. `--diagnose` reports permission and binding state without credentials.
 

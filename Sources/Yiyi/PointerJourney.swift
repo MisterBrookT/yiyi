@@ -27,12 +27,15 @@ import YiyiCore
         event.flags = option ? .maskAlternate : []
         event.post(tap: .cghidEventTap)
     }
+    var firedBeforeRelease = false
     func gesture(option: Bool, duration: Int, drag: Bool = false) async throws {
         window.makeFirstResponder(editor); editor.setSelectedRange(NSRange(location: 0, length: (editor.string as NSString).length))
         try await Task.sleep(for: .milliseconds(80))
+        let before = captures.count
         post(.leftMouseDown, option: option)
+        if drag { try await Task.sleep(for: .milliseconds(120)); post(.leftMouseDragged, option: option, xOffset: 20) }
         try await Task.sleep(for: .milliseconds(duration))
-        if drag { post(.leftMouseDragged, option: option, xOffset: 20); try await Task.sleep(for: .milliseconds(80)) }
+        firedBeforeRelease = captures.count > before
         post(.leftMouseUp, option: option, xOffset: drag ? 20 : 0)
         try await Task.sleep(for: .milliseconds(150))
     }
@@ -43,9 +46,10 @@ import YiyiCore
     guard captures.isEmpty else { throw pointerFailure("Short click triggered a command") }
     try await gesture(option: true, duration: 500, drag: true)
     guard captures.isEmpty else { throw pointerFailure("Dragging triggered a command") }
-    try await gesture(option: true, duration: 550)
+    try await gesture(option: true, duration: 700)
     guard captures.count == 1 else { throw pointerFailure("Expected exactly one real event-tap dispatch; got \(captures.count)") }
+    guard firedBeforeRelease else { throw pointerFailure("Command did not start while the button was still held") }
     guard captures[0] == editor.string else { throw pointerFailure("Selection at press time was not preserved") }
-    print("PASS: real pointer event tap; ordinary/short/drag ignored; one hold-release dispatch; original selection preserved")
+    print("PASS: real pointer event tap; ordinary/short/drag ignored; fires once while still held, release inert; original selection preserved")
 }
 private func pointerFailure(_ message: String) -> NSError { NSError(domain: "PointerJourney", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
