@@ -62,3 +62,7 @@ Settings live in `~/.config/yiyi/config.json`. Saved files are owner-readable/wr
 Changing a server’s origin requires re-entering the API key or explicitly confirming its reuse. Prompt and clipboard text are not written to diagnostic logs.
 
 [Configuration details](docs/configuration.md) · [Development and checks](docs/development.md)
+
+### Keep a translation open
+
+Click the pin beside the result window’s close button to keep it open when switching apps. Click the close button or press Escape to dismiss it. Pinning is off for each new translation invocation; updates to the current result preserve it.
