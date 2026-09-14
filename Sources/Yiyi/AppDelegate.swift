@@ -14,10 +14,13 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         requestAccessibility: { [weak self] in self?.openAccessibilitySettings() },
         repairAccessibility: { [weak self] in self?.repairAccessibilityPermission() },
         reloadFromDisk: { [weak self] in self?.reloadConfig(showErrors: true) },
-        pointerStatus: { [weak self] in self?.pointer.status ?? "Off" }
+        pointerStatus: { [weak self] in self?.pointer.status ?? "Off" },
+        launchAtLogin: (
+            get: { SMAppService.mainApp.status == .enabled },
+            set: { [weak self] enabled in self?.setLaunchAtLogin(enabled) }
+        )
     )
     private var statusItem: NSStatusItem!
-    private var lastResult: String?
     private var requests = LatestRequest()
     private var isCapturing = false
     private var accessibilityPollTimer: Timer?
@@ -40,6 +43,9 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         statusItem.button?.image = image
         statusItem.button?.title = ""
         statusItem.button?.setAccessibilityLabel("yiyi")
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked(_:))
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         NotificationCenter.default.addObserver(forName: .yiyiHotkey, object: nil, queue: .main) { [weak self] note in
             let index = note.object as? Int ?? 0
             appLogger.notice("notification received command=\(index)")
@@ -67,60 +73,30 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         return .terminateLater
     }
 
-    private func rebuildMenu() {
+    /// The menu-bar icon is a single door: click opens Settings. Right-click (or Control-click)
+    /// offers Quit so the app remains easy to leave. Everything else lives in Settings.
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        let secondary = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
+        guard secondary else { openSettings(); return }
         let menu = NSMenu()
-        add("Translate now", action: #selector(translateNow), to: menu)
-        if configs.config.commands.count > 1 {
-            let submenu = NSMenu()
-            for (index, command) in configs.config.commands.enumerated() { let item = add(command.name, action: #selector(runMenuCommand(_:)), to: submenu); item.tag = index }
-            let parent = NSMenuItem(title: "Commands", action: nil, keyEquivalent: ""); parent.submenu = submenu; menu.addItem(parent)
-        }
-        menu.addItem(.separator())
-        let copy = add("Copy last result", action: #selector(copyLast), to: menu); copy.isEnabled = lastResult != nil
-        menu.addItem(.separator())
         add("Settings…", action: #selector(openSettings), key: ",", to: menu)
-        let login = add("Launch at login", action: #selector(toggleLogin(_:)), to: menu); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        let accessibility = AccessibilityState.observe()
-        if accessibility.advice == .repairStaleGrant {
-            let item = add("Repair Accessibility Permission…", action: #selector(repairAccessibilityPermission), to: menu)
-            item.toolTip = "The existing grant belongs to an older build and will be re-requested."
-        } else if !accessibility.trusted {
-            let item = add("Enable Accessibility…", action: #selector(openAccessibilitySettings), to: menu)
-            item.toolTip = accessibilityHint
-        }
-        if !accessibility.trusted || accessibility.advice == .repairStaleGrant {
-            // Only the permission dance needs a manual relaunch; a working app never asks.
-            add("Relaunch yiyi", action: #selector(relaunch), to: menu)
-        }
         menu.addItem(.separator())
         // Quit must target NSApp: this delegate does not respond to terminate: and AppKit
         // disables any item whose target cannot perform its action.
-        add("Quit", action: #selector(NSApplication.terminate(_:)), key: "q", to: menu).target = NSApp
+        add("Quit yiyi", action: #selector(NSApplication.terminate(_:)), key: "q", to: menu).target = NSApp
         statusItem.menu = menu
+        sender.performClick(nil)
+        statusItem.menu = nil
     }
 
     @discardableResult private func add(_ title: String, action: Selector, key: String = "", to menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item); return item
     }
-    @objc private func translateNow() { runCommand(index: 0) }
-    @objc private func runMenuCommand(_ sender: NSMenuItem) { runCommand(index: sender.tag) }
     @objc func openSettings() { settings.show() }
-    @objc private func copyLast() {
-        if let lastResult {
-            let before = NSPasteboard.general.changeCount
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(lastResult, forType: .string)
-            appLogger.notice("changeCount \(before)->\(NSPasteboard.general.changeCount) entity=copyLast")
-        }
-    }
-    @objc private func selectProvider(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String else { return }
-        do { try configs.setDefaultProvider(name); rebuildMenu() } catch { panel.showError(message: "Could not save provider", detail: error.localizedDescription) }
-    }
-    @objc private func toggleLogin(_ sender: NSMenuItem) {
+    private func setLaunchAtLogin(_ enabled: Bool) {
         do {
-            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
-            sender.state = SMAppService.mainApp.status == .enabled ? .on : .off
+            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch { panel.showError(message: "Could not change launch at login", detail: error.localizedDescription) }
     }
 
@@ -128,7 +104,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         do {
             try configs.load(); let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
             pointer.configure(config: configs.config.pointerTrigger, commandCount: configs.config.commands.count)
-            rebuildMenu()
             if showErrors, !errors.isEmpty { panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n")) }
         } catch { panel.showError(message: "Config could not be loaded", detail: error.localizedDescription) }
     }
@@ -136,7 +111,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
     private func configDidChange() {
         pointer.configure(config: configs.config.pointerTrigger, commandCount: configs.config.commands.count)
         let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
-        rebuildMenu()
         if !errors.isEmpty { panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n")) }
     }
 
@@ -185,14 +159,13 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 let result = try await OpenAIClient().complete(prompt: prompt, provider: provider, apiKey: key)
                 guard requests.isCurrent(requestID) else { return }
                 appLogger.notice("provider completed characters=\(result.count)")
-                lastResult = result
                 if autoCopy {
                     let before = NSPasteboard.general.changeCount
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(result, forType: .string)
                     appLogger.notice("changeCount \(before)->\(NSPasteboard.general.changeCount) entity=autoCopy")
                 }
-                panel.showResult(result); rebuildMenu()
+                panel.showResult(result)
             } catch let error as OpenAIError {
                 guard requests.isCurrent(requestID) else { return }
                 showProviderError(error, command: command, provider: try? resolution.get().0)
@@ -262,7 +235,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 UserDefaults.standard.removeObject(forKey: AccessibilityState.grantedSignatureKey)
                 AccessibilityState.requestSystemPrompt()
                 startAccessibilityPollingIfNeeded(trusted: false)
-                rebuildMenu()
             case let .failure(error):
                 panel.showError(message: "Could not repair Accessibility permission", detail: error.localizedDescription)
             }
@@ -292,7 +264,6 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         accessibilityPollTimer = nil
         let errors = hotkeys.register(configs.config.commands, superKey: configs.config.superKey)
         NSLog("yiyi: Accessibility became trusted; hotkeys re-registered tap=%@", hotkeys.superKeyStatus)
-        rebuildMenu()
         if !errors.isEmpty {
             panel.showError(message: "Some hotkeys could not be registered", detail: errors.joined(separator: "\n"))
         }

@@ -31,6 +31,7 @@ private enum SettingsPane: String, CaseIterable {
     private let repairAccessibility: () -> Void
     private let reloadFromDisk: () -> Void
     private let pointerStatus: () -> String
+    private let launchAtLogin: (get: () -> Bool, set: (Bool) -> Void)?
     private let detail = SettingsBackgroundView()
     private var selectedPane: SettingsPane = .translation
     private var selectedCommand = 0
@@ -57,13 +58,15 @@ private enum SettingsPane: String, CaseIterable {
         repairAccessibility: @escaping () -> Void,
         reloadFromDisk: @escaping () -> Void,
         confirmation: ((String) -> Bool)? = nil,
-        pointerStatus: @escaping () -> String = { "Off" }
+        pointerStatus: @escaping () -> String = { "Off" },
+        launchAtLogin: (get: () -> Bool, set: (Bool) -> Void)? = nil
     ) {
         self.liveConfigs = configs
         self.baseline = configs.config
         self.configs = configs.makeDraft()
         self.confirmation = confirmation
         self.pointerStatus = pointerStatus
+        self.launchAtLogin = launchAtLogin
         self.accessibilityStatus = accessibilityStatus
         self.requestAccessibility = requestAccessibility
         self.repairAccessibility = repairAccessibility
@@ -344,7 +347,14 @@ private enum SettingsPane: String, CaseIterable {
         let copy = NSButton(checkboxWithTitle: "Copy translations to the clipboard", target: self, action: #selector(changeAutoCopy(_:))); copy.state = configs.config.autoCopy ? .on : .off; copy.setAccessibilityIdentifier("provider.auto-copy")
         let status = accessibilityStatus()
         let trusted = label(status.trusted ? "Accessibility trusted" : "Accessibility not granted", secondary: status.trusted); trusted.setAccessibilityIdentifier("permission.trusted"); trusted.setAccessibilityValue(status.trusted ? "yes" : "no")
-        var rows = [row("Clipboard", copy), row("Accessibility", trusted)]
+        var rows = [row("Clipboard", copy)]
+        if let launchAtLogin {
+            let login = NSButton(checkboxWithTitle: "Open yiyi at login", target: self, action: #selector(changeLaunchAtLogin(_:)))
+            login.state = launchAtLogin.get() ? .on : .off
+            login.setAccessibilityIdentifier("system.launch-at-login")
+            rows.append(row("Startup", login))
+        }
+        rows.append(row("Accessibility", trusted))
         if status.advice == .repairStaleGrant {
             let warning = label("The existing grant belongs to an older yiyi build and will be re-requested."); warning.maximumNumberOfLines = 0; warning.usesSingleLineMode = false; warning.lineBreakMode = .byWordWrapping; warning.textColor = Theme.attention; warning.setAccessibilityIdentifier("permission.stale-grant"); stretch(warning); warning.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true; rows.append(row("", warning))
             let repair = NSButton(title: "Repair Accessibility Permission…", target: self, action: #selector(repairAccessibilityPermission)); repair.setAccessibilityIdentifier("permission.repair"); rows.append(row("", repair))
@@ -506,6 +516,11 @@ private enum SettingsPane: String, CaseIterable {
     }
     @objc private func openInputMonitoring() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") { NSWorkspace.shared.open(url) }
+    }
+    /// Applies immediately: this is a system registration, not part of the saved draft.
+    @objc private func changeLaunchAtLogin(_ sender: NSButton) {
+        launchAtLogin?.set(sender.state == .on)
+        sender.state = launchAtLogin?.get() == true ? .on : .off
     }
     @objc private func changeAutoCopy(_ sender: NSButton) {
         do { try configs.setAutoCopy(sender.state == .on); fieldErrors.removeValue(forKey: "general.clipboard") }
