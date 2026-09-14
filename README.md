@@ -6,10 +6,7 @@
 
 [Website](https://misterbrookt.github.io/yiyi/) · [Install](#install)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/site/assets/result-dark.png">
-  <img src="docs/site/assets/result-light.png" width="640" alt="yiyi’s native translation result panel">
-</picture>
+<img src="docs/site/assets/scene-shortcut.png" width="760" alt="Selected text in a reading window, the shortcut pressed on a laptop keyboard, and yiyi’s result panel beside it">
 
 </div>
 
