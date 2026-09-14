@@ -65,3 +65,7 @@ Settings live in `~/.config/yiyi/config.json`. Saved files are owner-readable/wr
 Changing a server’s origin requires re-entering the API key or explicitly confirming its reuse. Prompt and clipboard text are not written to diagnostic logs.
 
 [Configuration details](docs/configuration.md) · [Development and checks](docs/development.md)
+
+### Reuse clipboard translations
+
+Repeating a clipboard translation reuses the last successful result when the text, command, and settings are unchanged. The cache is memory-only and clears when yiyi quits. Automatic copying of a result is recognized as yiyi’s own write, so triggering again does not translate the translation. New copied text or changed settings triggers a fresh request. Selection-based requests are not cached.
