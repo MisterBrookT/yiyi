@@ -147,7 +147,7 @@ try {
     if (readiness.exceptionDetails) throw new Error("Page did not load");
     const { result } = await cmd("Runtime.evaluate", {
       returnByValue: true,
-      expression: `JSON.stringify({overflow:document.documentElement.scrollWidth>innerWidth,images:[...document.images].every(i=>i.complete&&i.naturalWidth>0),osDark:matchMedia('(prefers-color-scheme:dark)').matches,siteBackground:getComputedStyle(document.body).backgroundColor,siteColorScheme:getComputedStyle(document.documentElement).colorScheme,selectedAssets:[...document.images].map(i=>new URL(i.currentSrc).pathname),reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,title:document.title,smallTargets:[...document.querySelectorAll('a')].filter(a=>a.getBoundingClientRect().width>0&&!a.classList.contains('skip-link')).filter(a=>a.getBoundingClientRect().height<44).length})`,
+      expression: `JSON.stringify({overflow:document.documentElement.scrollWidth>innerWidth,images:[...document.images].every(i=>i.complete&&i.naturalWidth>0),osDark:matchMedia('(prefers-color-scheme:dark)').matches,siteBackground:getComputedStyle(document.body).backgroundColor,siteColorScheme:getComputedStyle(document.documentElement).colorScheme,selectedAssets:[...document.images].map(i=>new URL(i.currentSrc).pathname),reelSnaps:(()=>{const r=document.getElementById('reel');if(!r)return false;const s=getComputedStyle(r);return s.scrollSnapType.startsWith('x')&&r.scrollWidth>r.clientWidth*2.5&&r.scrollWidth<=r.clientWidth*3.2})(),reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,title:document.title,smallTargets:[...document.querySelectorAll('a')].filter(a=>a.getBoundingClientRect().width>0&&!a.classList.contains('skip-link')).filter(a=>a.getBoundingClientRect().height<44).length})`,
     });
     const state = JSON.parse(result.value);
     if (
@@ -158,14 +158,10 @@ try {
       state.siteBackground !== "rgb(255, 255, 255)" ||
       state.siteColorScheme !== "light" ||
       state.selectedAssets.some((asset) => asset.includes("-dark")) ||
-      !state.selectedAssets.some((asset) =>
-        asset.endsWith("result-light.png"),
+      !["scene-shortcut.png", "scene-hold.png", "scene-commands.png"].every(
+        (name) => state.selectedAssets.some((asset) => asset.endsWith(name)),
       ) ||
-      !state.selectedAssets.some((asset) =>
-        asset.includes(
-          width <= 720 ? "settings-mobile-light.png" : "settings-light.png",
-        ),
-      ) ||
+      !state.reelSnaps ||
       !state.reduced ||
       state.smallTargets
     )

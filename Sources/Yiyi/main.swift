@@ -124,8 +124,13 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--translate" {
             let point = CGPoint(x: screen.visibleFrame.maxX - 1, y: screen.frame.height - screen.visibleFrame.minY - 1)
             CGWarpMouseCursorPosition(point)
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--settings-scene"), CommandLine.arguments.indices.contains(index + 2) {
+            do { try renderSettingsScene(from: URL(fileURLWithPath: CommandLine.arguments[index + 1]), to: URL(fileURLWithPath: CommandLine.arguments[index + 2])); exit(0) }
+            catch { fputs("yiyi settings scene png: \(error.localizedDescription)\n", stderr); exit(1) }
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--scene"), CommandLine.arguments.indices.contains(index + 1) {
-            do { try renderScenePreview(panel: preview, to: URL(fileURLWithPath: CommandLine.arguments[index + 1])); exit(0) }
+            let invocation: SceneInvocation = CommandLine.arguments.contains("trackpad") ? .trackpadHold : .keyboard("⌘ ⇧ T")
+            do { try renderScenePreview(panel: preview, invocation: invocation, to: URL(fileURLWithPath: CommandLine.arguments[index + 1])); exit(0) }
             catch { fputs("yiyi scene png: \(error.localizedDescription)\n", stderr); exit(1) }
         }
         preview.showLoading(command: "Translate to Chinese", source: "Design is intelligence made visible. A quiet interface lets content lead.")

@@ -44,7 +44,7 @@
       content="https://misterbrookt.github.io/yiyi/assets/social-preview.png"
     />
     <link rel="icon" href="assets/app-icon.png" type="image/png" />
-    <link rel="preload" as="image" href="assets/result-light.png" />
+    <link rel="preload" as="image" href="assets/scene-shortcut.png" />
     <link rel="stylesheet" href="styles.css" />
     <script type="application/ld+json">
       {
@@ -75,7 +75,7 @@
         ></a
       >
       <nav aria-label="Primary">
-        <a href="#how">How it works</a
+        <a href="#showcase-title">How it works</a
         ><a href="https://github.com/MisterBrookT/yiyi">GitHub</a>
       </nav>
     </header>
@@ -93,69 +93,54 @@
             href="https://github.com/MisterBrookT/yiyi#install"
             >Get yiyi</a
           >
-          <a class="button secondary" href="#how">How it works</a>
+          <a class="button secondary" href="#showcase-title">How it works</a>
         </div>
       </section>
 
-      <figure class="hero-media wrap-wide">
-        <img
-          src="assets/result-light.png"
-          width="1012"
-          height="512"
-          alt="A selected sentence in a reading window, with yiyi's translation panel beside it"
-          fetchpriority="high"
-        />
-      </figure>
-
-      <section class="story wrap" id="how" aria-labelledby="how-title">
-        <h2 id="how-title" class="visually-hidden">How it works</h2>
-        <ol class="steps">
-          <li><span>01</span><strong>Select</strong></li>
-          <li><span>02</span><strong>Invoke</strong></li>
-          <li><span>03</span><strong>Keep reading</strong></li>
-        </ol>
-      </section>
-
-      <section class="feature split wrap-wide" aria-labelledby="commands-title">
-        <div class="section-copy sticky-copy">
-          <h2 id="commands-title">Your prompts, your commands.</h2>
-          <p>
-            Give each command a name, a shortcut, and a prompt. Insert
-            <code>{selection}</code> or <code>{clipboard}</code> where the text
-            should go.
-          </p>
-        </div>
-        <figure class="product-frame wrap-mid">
-          <picture>
-            <source
-              srcset="assets/settings-mobile-light.png"
-              media="(max-width: 720px)"
-              width="708"
-              height="374"
-            />
-            <img
-              src="assets/settings-light.png"
-              width="1280"
-              height="1364"
-              alt="A yiyi translation command with a highlighted selection input in its prompt"
-              loading="lazy"
-            />
-          </picture>
-        </figure>
-      </section>
-
-      <section class="feature gesture wrap" aria-labelledby="gesture-title">
-        <div class="section-copy">
-          <h2 id="gesture-title">Or never touch the keyboard.</h2>
-          <p>Hold Option and press. The translation starts while you hold.</p>
-        </div>
+      <section class="showcase wrap-wide" aria-labelledby="showcase-title">
+        <h2 id="showcase-title" class="visually-hidden">How yiyi works</h2>
         <div
-          class="gesture-demo"
-          aria-label="Option plus primary click hold gesture illustration"
+          class="reel"
+          id="reel"
+          tabindex="0"
+          aria-roledescription="carousel"
         >
-          <kbd>⌥ option</kbd><span aria-hidden="true">+</span>
-          <div class="pointer"><span></span>hold</div>
+          <figure class="slide" id="slide-shortcut">
+            <img
+              src="assets/scene-shortcut.png"
+              width="1012"
+              height="492"
+              alt="A selected sentence in a reading window, translated by yiyi after a keyboard shortcut"
+              fetchpriority="high"
+            />
+            <figcaption>Select text, press your shortcut, read.</figcaption>
+          </figure>
+          <figure class="slide" id="slide-hold">
+            <img
+              src="assets/scene-hold.png"
+              width="1012"
+              height="492"
+              alt="The same translation triggered by holding Option and pressing the trackpad"
+            />
+            <figcaption>
+              Or hold Option and press the trackpad. No keyboard.
+            </figcaption>
+          </figure>
+          <figure class="slide" id="slide-commands">
+            <img
+              src="assets/scene-commands.png"
+              width="1012"
+              height="492"
+              alt="yiyi's Commands settings, showing a translation prompt with a highlighted selection placeholder"
+            />
+            <figcaption>Your prompts, your shortcuts, your model.</figcaption>
+          </figure>
         </div>
+        <nav class="reel-nav" aria-label="Slides">
+          <a href="#slide-shortcut" aria-label="Shortcut"></a
+          ><a href="#slide-hold" aria-label="Hold"></a
+          ><a href="#slide-commands" aria-label="Commands"></a>
+        </nav>
       </section>
 
       <section class="closing wrap" aria-labelledby="closing-title">
@@ -180,5 +165,33 @@
         ><a href="https://github.com/MisterBrookT/yiyi/issues">Issues</a>
       </div>
     </footer>
+    <script>
+      (() => {
+        const reel = document.getElementById("reel");
+        const dots = [...document.querySelectorAll(".reel-nav a")];
+        if (!reel || !("IntersectionObserver" in window)) return;
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              const id = "#" + entry.target.id;
+              for (const dot of dots)
+                dot.getAttribute("href") === id
+                  ? dot.setAttribute("aria-current", "true")
+                  : dot.removeAttribute("aria-current");
+            }
+          },
+          { root: reel, threshold: 0.6 },
+        );
+        for (const slide of reel.children) observer.observe(slide);
+        for (const dot of dots)
+          dot.addEventListener("click", (event) => {
+            const target = document.querySelector(dot.getAttribute("href"));
+            if (!target) return;
+            event.preventDefault();
+            target.scrollIntoView({ block: "nearest", inline: "center" });
+          });
+      })();
+    </script>
   </body>
 </html>
