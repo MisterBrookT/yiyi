@@ -400,17 +400,10 @@ private enum SettingsPane: String, CaseIterable {
         }
         rows.append(advancedToggle("system"))
         if expandedAdvanced.contains("system") {
-            let tapStatus = status.superKeyTapStatus
-            let tap = label(tapStatus, mono: true)
-            tap.maximumNumberOfLines = 0; tap.usesSingleLineMode = false; tap.lineBreakMode = .byWordWrapping
-            tap.preferredMaxLayoutWidth = controlWidth
-            tap.setAccessibilityIdentifier("superkey.tap"); tap.setAccessibilityValue(tapStatus)
-            stretch(tap); tap.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
-            let signature = label(status.signatureIdentity, mono: true); signature.maximumNumberOfLines = 3; signature.lineBreakMode = .byWordWrapping; signature.setAccessibilityIdentifier("permission.signature"); signature.setAccessibilityValue(status.signatureIdentity); stretch(signature)
             let edit = NSButton(title: "Edit config file…", target: self, action: #selector(editConfigFile)); edit.setAccessibilityIdentifier("system.edit-config")
             let reload = NSButton(title: "Reload from file", target: self, action: #selector(reloadFromFile)); reload.setAccessibilityIdentifier("system.reload-config")
             let files = NSStackView(views: [edit, reload]); files.orientation = .horizontal; files.spacing = 8; files.alignment = .centerY
-            rows += [row("Leader key tap", tap), row("Signing identity", signature), row("Config file", files)]
+            rows += [row("Config file", files)]
         }
         appendError(for: "general", to: &rows)
         return section("General", rows: rows)
