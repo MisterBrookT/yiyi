@@ -256,13 +256,13 @@ private enum SettingsPane: String, CaseIterable {
         prosePlaceholder(provider.apiStyle == .anthropic ? "claude-sonnet-4-5" : "Model name from your server", in: model)
         let style = popup(APIStyle.allCases.map(\.displayName), selected: provider.apiStyle.displayName, id: "provider.api-style", action: #selector(providerStyle(_:)))
         style.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
-        var rows = [row("API", style), row("Base URL", baseURL), row("API key", keyRow), row("", status), row("Model", model)]
+        let effort = popup(ReasoningEffort.allCases.map(\.rawValue), selected: provider.reasoningEffort.rawValue, id: "provider.reasoning-effort", action: #selector(providerEffort(_:))); effort.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
+        var rows = [row("API", style), row("Base URL", baseURL), row("API key", keyRow), row("", status), row("Model", model), row("Reasoning", effort)]
         rows.append(advancedToggle("provider"))
         if expandedAdvanced.contains("provider") {
             let env = field(provider.apiKeyEnv, id: "provider.api-key-env", mono: true)
             let temperature = field(provider.temperature.map { String($0) } ?? "", id: "provider.temperature", mono: true); prosePlaceholder("Empty to omit", in: temperature)
-            let effort = popup(ReasoningEffort.allCases.map(\.rawValue), selected: provider.reasoningEffort.rawValue, id: "provider.reasoning-effort", action: #selector(providerEffort(_:))); effort.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
-            rows += [row("Key environment", env), row("Temperature", temperature), row("Reasoning", effort)]
+            rows += [row("Key environment", env), row("Temperature", temperature)]
         }
         appendError(for: "provider", to: &rows)
         return section("Connection", rows: rows)
@@ -349,18 +349,14 @@ private enum SettingsPane: String, CaseIterable {
             promptHeader.widthAnchor.constraint(equalToConstant: formWidth).isActive = true
             spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
             let promptGroup = column([promptHeader, promptScroll, promptStatus], spacing: 8)
-            // Advanced lives inside the command card, like the connection card, so the disclosure
-            // never floats alone between sections.
-            var rows = [row("Name", name), row("Keyboard", keyboardRow), row("Trackpad", trackpadRow), advancedToggle("command.\(index)")]
-            if expandedAdvanced.contains("command.\(index)") {
-                if let override = command.provider, let connection = configs.config.providers[override] {
-                    let reset = NSButton(title: "Use main connection", target: self, action: #selector(clearCommandConnection(_:))); reset.tag = index
-                    reset.setAccessibilityIdentifier("command.\(index).use-default-connection")
-                    rows += [row("Connection override", label(connection.baseURL, secondary: true)), row("", reset)]
-                }
-                let model = field(command.model ?? "", id: "command.\(index).model", mono: true); prosePlaceholder("Inherit", in: model)
-                let effort = popup(["inherit"] + ReasoningEffort.allCases.map(\.rawValue), selected: command.reasoningEffort?.rawValue ?? "inherit", id: "command.\(index).reasoning-effort", action: #selector(commandEffort(_:))); effort.tag = index
-                rows += [row("Model override", model), row("Reasoning", effort)]
+            // Model, reasoning, and temperature belong to the Connection tab. Per-command overrides
+            // stay honoured from the config file; only a legacy connection override is surfaced,
+            // so it can be cleared.
+            var rows = [row("Name", name), row("Keyboard", keyboardRow), row("Trackpad", trackpadRow)]
+            if let override = command.provider, let connection = configs.config.providers[override] {
+                let reset = NSButton(title: "Use main connection", target: self, action: #selector(clearCommandConnection(_:))); reset.tag = index
+                reset.setAccessibilityIdentifier("command.\(index).use-default-connection")
+                rows += [row("Connection", label(connection.baseURL, secondary: true)), row("", reset)]
             }
             appendError(for: "command.\(index)", to: &rows)
             sectionsList.append(section("", rows: rows))
@@ -562,7 +558,6 @@ private enum SettingsPane: String, CaseIterable {
         do { try configs.setPointerTrigger(value) } catch { reject(error, at: "command.\(sender.tag).pointer"); return }
         rebuild()
     }
-    @objc private func commandEffort(_ sender: NSPopUpButton) { let raw = sender.titleOfSelectedItem; do { try configs.setCommand(sender.tag, reasoningEffort: raw == "inherit" ? .some(nil) : .some(raw.flatMap(ReasoningEffort.init(rawValue:)))) } catch { reject(error, at: "command.\(sender.tag).reasoning-effort"); return }; rebuild() }
     @objc private func changeSuperKey(_ sender: NSPopUpButton) {
         guard let selected = sender.titleOfSelectedItem, let value = SuperKey.allCases.first(where: { $0.displayName == selected }) else { return }
         do { try configs.setSuperKey(value); fieldErrors.removeValue(forKey: "general.leader") }
@@ -664,7 +659,6 @@ private enum SettingsPane: String, CaseIterable {
                 let parts = id.split(separator: ".").map(String.init)
                 if parts.count == 3, parts[0] == "command", let index = Int(parts[1]) {
                     if parts[2] == "name" { try configs.setCommand(index, name: sender.stringValue) }
-                    else if parts[2] == "model" { try configs.setCommand(index, model: .some(sender.stringValue.isEmpty ? nil : sender.stringValue)) }
                 }
             }
             fieldErrors.removeValue(forKey: id)
