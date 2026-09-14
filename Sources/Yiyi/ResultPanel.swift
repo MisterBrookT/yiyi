@@ -43,6 +43,8 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
     private let sourceButton = NSButton()
     private let copyButton = NSButton()
     private let closeButton = NSButton()
+    private let pinButton = NSButton()
+    private(set) var isPinned = false
     private let actionButton = NSButton()
     private let spinner = NSProgressIndicator()
     private var keyMonitor: Any?
@@ -64,6 +66,7 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
         panel.delegate = self; panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false; panel.hasShadow = true
+        panel.hidesOnDeactivate = false
         panel.backgroundColor = .clear; panel.isOpaque = false
         panel.appearance = NSAppearance(named: .aqua)
         panel.isMovableByWindowBackground = true
@@ -95,12 +98,14 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
         configureButton(sourceButton, title: "Original", symbol: "chevron.down", action: #selector(toggleOriginal), id: "result.show-original")
         configureButton(copyButton, title: "Copy", symbol: "doc.on.doc", action: #selector(copyResult), id: "result.copy")
         configureButton(closeButton, title: "", symbol: "xmark", action: #selector(close), id: "result.close")
+        configureButton(pinButton, title: "", symbol: "pin", action: #selector(togglePin), id: "result.pin")
+        updatePinButton()
         closeButton.setAccessibilityLabel("Close translation"); closeButton.toolTip = "Close (Esc)"
         copyButton.toolTip = "Copy translation (⌘C)"
         configureButton(actionButton, title: "Continue", symbol: nil, action: #selector(confirmAction), id: "result.action")
         spinner.style = .spinning; spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false; spinner.setAccessibilityLabel("Translating")
-        for view in [commandLabel, scroll, sourceButton, copyButton, closeButton, actionButton, spinner] { root.addSubview(view) }
+        for view in [commandLabel, scroll, sourceButton, copyButton, pinButton, closeButton, actionButton, spinner] { root.addSubview(view) }
         reset()
     }
 
@@ -120,6 +125,7 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
         showLoading(command: command, capture: CaptureDecision(text: source, source: .selection))
     }
     func showLoading(command: String, capture: CaptureDecision, relaunch: (() -> Void)? = nil) {
+        isPinned = false; updatePinButton()
         reset(); commandLabel.stringValue = command
         original = capture.text ?? ""; sourceTitle = capture.source == .clipboard ? "Clipboard" : "Original"
         sourceButton.toolTip = capture.hint ?? "Show the full original text"
@@ -161,6 +167,18 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
         }
         textView.textStorage?.setAttributedString(rendered)
     }
+    @objc private func togglePin() {
+        isPinned.toggle()
+        updatePinButton()
+    }
+    private func updatePinButton() {
+        pinButton.state = isPinned ? .on : .off
+        pinButton.image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: nil)
+        pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
+        pinButton.setAccessibilityLabel(isPinned ? "Unpin window" : "Pin window")
+        pinButton.setAccessibilityValue(isPinned ? "Pinned" : "Unpinned")
+        pinButton.toolTip = isPinned ? "Pinned: stays open when switching apps. Click to unpin." : "Pin this window to keep it open when switching apps."
+    }
     @objc private func toggleOriginal() {
         originalExpanded.toggle()
         if !originalExpanded { panel.makeFirstResponder(textView) }
@@ -191,9 +209,10 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
         let bodyHeight = min(max(24, safeFrame.height - 108), min(420, total))
         let height = 56 + bodyHeight + 52
         panel.setContentSize(NSSize(width: width, height: height))
-        commandLabel.frame = NSRect(x: 24, y: height - 39, width: width - 108, height: 18)
+        commandLabel.frame = NSRect(x: 24, y: height - 39, width: width - 140, height: 18)
         closeButton.frame = NSRect(x: width - 48, y: height - 44, width: 28, height: 28)
-        spinner.frame = NSRect(x: width - 72, y: height - 36, width: 14, height: 14)
+        pinButton.frame = NSRect(x: width - 80, y: height - 44, width: 28, height: 28)
+        spinner.frame = NSRect(x: width - 104, y: height - 36, width: 14, height: 14)
         scroll.frame = NSRect(x: 24, y: 52, width: contentWidth, height: bodyHeight)
         func fit(_ button: NSButton) -> CGFloat { max(64, ceil(button.fittingSize.width) + 20) }
         sourceButton.frame = NSRect(x: 18, y: 12, width: fit(sourceButton), height: 28)
@@ -235,6 +254,7 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
     @objc func close() {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         confirm = nil; panel.orderOut(nil)
+        isPinned = false; updatePinButton()
     }
     func control(_ id: String) -> NSView? {
         func find(_ view: NSView) -> NSView? { if view.accessibilityIdentifier() == id { return view }; return view.subviews.lazy.compactMap(find).first }
@@ -248,6 +268,6 @@ private final class ReadingDocument: NSView { override var isFlipped: Bool { tru
         try png.write(to: url)
     }
     func windowDidResignKey(_ notification: Notification) {
-        guard closesOnResign, Date().timeIntervalSince(shownAt) > 0.6 else { return }; close()
+        guard closesOnResign, !isPinned, Date().timeIntervalSince(shownAt) > 0.6 else { return }; close()
     }
 }

@@ -228,6 +228,35 @@ import YiyiCore
         }
     }
     try check("confirmation.used", confirmations >= 5)
+    let pinnable = ResultPanelController()
+    defer { pinnable.close() }
+    pinnable.showLoading(command: "Translate to Chinese", source: "Test pin")
+    let pin = pinnable.control("result.pin") as! NSButton
+    try check("pin.default-off", !pinnable.isPinned && pin.state == .off)
+    act(pin)
+    try check("pin.enabled", pinnable.isPinned && pin.state == .on && !pinnable.window.hidesOnDeactivate)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.7))
+    pinnable.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: pinnable.window))
+    try check("pin.survives-focus-loss", pinnable.window.isVisible)
+    pinnable.showResult("Draft translation")
+    pinnable.showResult("Final translation")
+    try check("pin.survives-refinement", pinnable.isPinned && pinnable.window.isVisible)
+    try pinnable.renderPNG(to: outdir.appendingPathComponent("pinned-result.png"))
+    pinnable.showError(message: "Test error")
+    try check("pin.survives-error", pinnable.isPinned)
+    act(pin)
+    pinnable.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: pinnable.window))
+    try check("pin.unpinned-dismisses", !pinnable.window.isVisible)
+    pinnable.showLoading(command: "New translation", source: "Next")
+    try check("pin.new-invocation-off", !pinnable.isPinned)
+    act(pin)
+    act(pinnable.control("result.close") as! NSButton)
+    try check("pin.manual-close", !pinnable.window.isVisible && !pinnable.isPinned)
+    pinnable.showLoading(command: "Reopen", source: "Again")
+    act(pin)
+    pinnable.showLoading(command: "Another invocation", source: "Another")
+    try check("pin.visible-new-invocation-off", !pinnable.isPinned)
+    pinnable.close()
     let reading = ResultPanelController(closesOnResign: false)
     defer { reading.close() }
     let originalText = "Design is intelligence made visible.\nA quiet interface lets content lead."
