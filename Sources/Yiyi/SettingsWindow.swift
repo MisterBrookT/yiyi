@@ -326,10 +326,9 @@ private enum SettingsPane: String, CaseIterable {
             promptHeader.widthAnchor.constraint(equalToConstant: formWidth).isActive = true
             spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
             let promptGroup = column([promptHeader, promptScroll, promptStatus], spacing: 8)
-            var rows = [row("Name", name), row("Shortcut", shortcut)]
-            sectionsList.append(section("", rows: rows))
-            sectionsList.append(promptGroup)
-            rows = [advancedToggle("command.\(index)")]
+            // Advanced lives inside the command card, like the connection card, so the disclosure
+            // never floats alone between sections.
+            var rows = [row("Name", name), row("Shortcut", shortcut), advancedToggle("command.\(index)")]
             if expandedAdvanced.contains("command.\(index)") {
                 if let override = command.provider, let connection = configs.config.providers[override] {
                     let reset = NSButton(title: "Use main connection", target: self, action: #selector(clearCommandConnection(_:))); reset.tag = index
@@ -341,7 +340,8 @@ private enum SettingsPane: String, CaseIterable {
                 rows += [row("Model override", model), row("Reasoning", effort)]
             }
             appendError(for: "command.\(index)", to: &rows)
-            sectionsList.append(column(rows, spacing: 12))
+            sectionsList.append(section("", rows: rows))
+            sectionsList.append(promptGroup)
         }
         if configs.config.commands.isEmpty {
             let empty = label("Add a command to choose a shortcut and write its prompt.", secondary: true)
