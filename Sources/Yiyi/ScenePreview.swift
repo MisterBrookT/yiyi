@@ -123,7 +123,7 @@ let trafficGreen = NSColor(srgbRed: 0.157, green: 0.784, blue: 0.251, alpha: 1)
 /// A compact laptop deck: a few keyboard rows on top, the trackpad directly beneath.
 /// Keys are schematic; only the keys that matter are labelled. Either some keys are pressed
 /// (keyboard shortcut) or a fingertip rests on the trackpad (press-and-hold).
-@MainActor private func drawInputDeck(at origin: NSPoint, size: NSSize, pressedKeys: Set<String>, fingerOnTrackpad: Bool) {
+@MainActor func drawInputDeck(at origin: NSPoint, size: NSSize, pressedKeys: Set<String>, fingerOnTrackpad: Bool) {
     let ink = NSColor(white: 0.3, alpha: 1)
     let accent = NSColor(srgbRed: 0.0, green: 0.478, blue: 1.0, alpha: 1)
     let body = NSBezierPath(roundedRect: NSRect(origin: origin, size: size), xRadius: 10, yRadius: 10)
@@ -189,6 +189,17 @@ let trafficGreen = NSColor(srgbRed: 0.157, green: 0.784, blue: 0.251, alpha: 1)
     finger.close()
     NSColor.white.setFill(); finger.fill()
     ink.withAlphaComponent(0.85).setStroke(); finger.lineWidth = 1.5; finger.lineJoinStyle = .round; finger.stroke()
+}
+
+/// The deck as a standalone image for Settings. Drawn at the view's backing scale, so it stays crisp.
+@MainActor func inputDeckImage(pressedKeys: Set<String>, fingerOnTrackpad: Bool, size: NSSize = NSSize(width: 150, height: 85)) -> NSImage {
+    let full = NSSize(width: 236, height: 134)
+    return NSImage(size: size, flipped: false) { _ in
+        let scale = size.width / full.width
+        NSGraphicsContext.current?.cgContext.scaleBy(x: scale, y: scale)
+        drawInputDeck(at: .zero, size: full, pressedKeys: pressedKeys, fingerOnTrackpad: fingerOnTrackpad)
+        return true
+    }
 }
 
 /// Frames an existing settings capture in the same padded scene treatment. The window is shown

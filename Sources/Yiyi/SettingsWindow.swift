@@ -22,7 +22,6 @@ private enum SettingsPane: String, CaseIterable {
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
     private let saveStatus = NSTextField(wrappingLabelWithString: "No changes")
     private var saveError: String?
-    private var shortcutModes: [Int: Bool] = [:]
     private var closingAfterDiscard = false
     private var keyWasEntered = false
     private var keyRevealed = false
@@ -285,10 +284,14 @@ private enum SettingsPane: String, CaseIterable {
         var sectionsList: [NSView] = [row("Command", selection)]
         for (index, command) in configs.config.commands.enumerated() where index == selectedCommand {
             let name = field(command.name, id: "command.\(index).name")
-            let hyperMode = shortcutModes[index] ?? (command.hotkey.hasPrefix("super+") || command.hotkey.hasPrefix("hyper+"))
-            let mode = popup(["Keyboard", "Hyper Key"], selected: hyperMode ? "Hyper Key" : "Keyboard", id: "command.\(index).hotkey-mode", action: #selector(changeShortcutMode(_:))); mode.tag = index
-            let hotkey = HotkeyRecorder(value: command.hotkey, recordsSuperKey: hyperMode); hotkey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
-            let shortcut = NSStackView(views: [mode, hotkey]); shortcut.orientation = .horizontal; shortcut.spacing = 8
+            // One recorder for both kinds: a modifier chord records a regular shortcut; a bare key
+            // records "Hyper Key + key" when a Hyper Key is set up in General.
+            let superKey = configs.config.superKey
+            let hotkey = HotkeyRecorder(value: command.hotkey, allowsSuperKey: superKey != .none && superKey != .externalHyper); hotkey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
+            let hint = label(shortcutHint(for: command.hotkey, superKey: superKey), secondary: true); hint.font = .systemFont(ofSize: 11)
+            hint.maximumNumberOfLines = 0; hint.usesSingleLineMode = false; hint.lineBreakMode = .byWordWrapping; hint.preferredMaxLayoutWidth = controlWidth - 160
+            hint.setAccessibilityIdentifier("command.\(index).hotkey-hint")
+            let shortcut = NSStackView(views: [hotkey, hint]); shortcut.orientation = .horizontal; shortcut.spacing = 12; shortcut.alignment = .centerY
             let prompt = NSTextView(frame: NSRect(x: 0, y: 0, width: formWidth - 2, height: 188))
             prompt.string = promptDrafts[index] ?? command.prompt
             if let range = promptSelections[index], NSMaxRange(range) <= (prompt.string as NSString).length { prompt.setSelectedRange(range) }
@@ -389,30 +392,46 @@ private enum SettingsPane: String, CaseIterable {
         return column([triggersSection(), section("General", rows: rows)], spacing: 24)
     }
     /// The two ways to start a command without a plain keyboard shortcut. Both are global, so they live here rather than per command.
+    /// The two ways to start a command: from the keyboard or from the pointer. Each card opens with a
+    /// small picture of the gesture, the same illustration the website uses, so the setting is
+    /// recognisable before reading a word.
     private func triggersSection() -> NSView {
-        let hyper = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
+        let superKey = configs.config.superKey
+        let hyper = popup(SuperKey.allCases.map(\.displayName), selected: superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
         hyper.toolTip = "Use a right-side modifier for yiyi, or choose External Hyper for an existing ⌃⌥⇧⌘ remap."
-        var rows = [row("Hyper Key", hyper)]
-        let hyperHelp = label(configs.config.superKey == .none ? "Off. Commands set to Hyper Key will not fire until you choose one." : "Commands can use Hyper Key + a letter as their shortcut.", secondary: true)
-        hyperHelp.maximumNumberOfLines = 0; hyperHelp.usesSingleLineMode = false; hyperHelp.lineBreakMode = .byWordWrapping; hyperHelp.preferredMaxLayoutWidth = controlWidth; hyperHelp.font = .systemFont(ofSize: 11)
-        stretch(hyperHelp); rows.append(row("", hyperHelp))
-        let pointer = NSButton(checkboxWithTitle: "Press and hold (experimental)", target: self, action: #selector(changePointer(_:)))
+        let keyboardBlurb = superKey == .none
+            ? "Each command has its own shortcut, set under Commands. Add a Hyper Key to trigger commands with one right-side modifier plus a letter."
+            : "Each command has its own shortcut, set under Commands. Hold \(superKey.displayName) and tap a command's key."
+        let keyboardRows = [triggerIntro(image: inputDeckImage(pressedKeys: ["⌘", "⇧", "T"], fingerOnTrackpad: false, size: NSSize(width: 168, height: 95)), text: keyboardBlurb), row("Hyper Key", hyper)]
+        let keyboard = section("Keyboard", rows: keyboardRows)
+
+        let pointer = NSButton(checkboxWithTitle: "Press and hold to translate (experimental)", target: self, action: #selector(changePointer(_:)))
         pointer.state = configs.config.pointerTrigger.enabled ? .on : .off
         pointer.isEnabled = !configs.config.commands.isEmpty
         pointer.setAccessibilityIdentifier("pointer.enabled")
-        rows.append(row("Mouse / trackpad", pointer))
+        var pointerRows = [triggerIntro(image: inputDeckImage(pressedKeys: [], fingerOnTrackpad: true, size: NSSize(width: 168, height: 95)), text: "Select text, then press the trackpad or mouse button and hold still for half a second. The command starts while you hold. Clicks and drags are unchanged."), row("Gesture", pointer)]
         if configs.config.pointerTrigger.enabled {
             let command = popup(configs.config.commands.map(\.name), selected: "", id: "pointer.command", action: #selector(changePointerCommand(_:)))
             command.selectItem(at: configs.config.pointerTrigger.commandIndex)
-            let help = label("Press the trackpad or mouse button and hold still for half a second; the command starts while you hold. Uses the selection at press time, or the clipboard. Clicks and drags are unchanged.", secondary: true)
-            stretch(help)
-            rows += [row("Run command", command), row("", help), row("Gesture status", label(configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save", secondary: true))]
+            pointerRows += [row("Run command", command), row("Status", label(configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save", secondary: true))]
             let permission = NSButton(title: "Input Monitoring Settings…", target: self, action: #selector(openInputMonitoring))
-            rows.append(row("", permission))
+            pointerRows.append(row("", permission))
         }
-        return section("Triggers", rows: rows)
+        let mouse = section("Mouse / trackpad", rows: pointerRows)
+        return column([keyboard, mouse], spacing: 24)
     }
-
+    private func triggerIntro(image: NSImage, text: String) -> NSView {
+        let picture = NSImageView(image: image); picture.imageScaling = .scaleProportionallyDown
+        picture.widthAnchor.constraint(equalToConstant: image.size.width).isActive = true
+        picture.heightAnchor.constraint(equalToConstant: image.size.height).isActive = true
+        let blurb = label(text, secondary: true); blurb.font = .systemFont(ofSize: 12)
+        blurb.maximumNumberOfLines = 0; blurb.usesSingleLineMode = false; blurb.lineBreakMode = .byWordWrapping
+        let width = labelWidth + 16 + controlWidth
+        blurb.preferredMaxLayoutWidth = width - image.size.width - 20
+        let intro = NSStackView(views: [picture, blurb]); intro.orientation = .horizontal; intro.spacing = 20; intro.alignment = .centerY
+        intro.widthAnchor.constraint(equalToConstant: width).isActive = true
+        return intro
+    }
     /// Disclosure row: power-user fields exist, but never greet a new user.
     private func advancedToggle(_ id: String) -> NSView {
         let expanded = expandedAdvanced.contains(id)
@@ -536,12 +555,13 @@ private enum SettingsPane: String, CaseIterable {
         catch { reject(error, at: "command.\(sender.tag).provider"); return }
         rebuild()
     }
-    @objc private func changeShortcutMode(_ sender: NSPopUpButton) {
-        window?.makeFirstResponder(nil)
-        shortcutModes[sender.tag] = sender.indexOfSelectedItem == 1
-        do { try configs.setCommand(sender.tag, hotkey: "") }
-        catch { reject(error, at: "command.\(sender.tag).hotkey"); return }
-        rebuild()
+    private func shortcutHint(for hotkey: String, superKey: SuperKey) -> String {
+        let isHyper = hotkey.hasPrefix("super+") || hotkey.hasPrefix("hyper+")
+        switch superKey {
+        case .none: return isHyper ? "Needs a Hyper Key. Choose one in General → Keyboard." : "Press a key combination."
+        case .externalHyper: return isHyper ? "Fires with your external ⌃⌥⇧⌘ Hyper Key." : "Press a key combination."
+        default: return isHyper ? "Hold \(superKey.displayName), tap the key." : "Press a key combination, or a single key to pair with \(superKey.displayName)."
+        }
     }
     @objc private func commandEffort(_ sender: NSPopUpButton) { let raw = sender.titleOfSelectedItem; do { try configs.setCommand(sender.tag, reasoningEffort: raw == "inherit" ? .some(nil) : .some(raw.flatMap(ReasoningEffort.init(rawValue:)))) } catch { reject(error, at: "command.\(sender.tag).reasoning-effort"); return }; rebuild() }
     @objc private func changeSuperKey(_ sender: NSPopUpButton) {
@@ -627,7 +647,7 @@ private enum SettingsPane: String, CaseIterable {
                 self.promptDrafts = Dictionary(uniqueKeysWithValues: self.promptDrafts.filter { $0.key != index }.map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
                 self.fieldErrors = self.fieldErrors.filter { !$0.key.hasPrefix("command.") }
                 self.fieldDrafts = self.fieldDrafts.filter { !$0.key.hasPrefix("command.") }
-                self.promptSelections.removeAll(); self.shortcutModes.removeAll()
+                self.promptSelections.removeAll()
                 self.selectedCommand = min(index, max(0, self.configs.config.commands.count - 1))
             } catch { self.reject(error, at: "commands.remove"); return }
             self.rebuild()
@@ -752,7 +772,7 @@ private enum SettingsPane: String, CaseIterable {
     private func resetDraft() {
         baseline = liveConfigs.config
         promptDrafts.removeAll(); fieldDrafts.removeAll(); fieldErrors.removeAll(); editedFields.removeAll()
-        shortcutModes.removeAll(); promptSelections.removeAll(); saveError = nil
+        promptSelections.removeAll(); saveError = nil
         selectedProvider = baseline.defaultProvider
         keyWasEntered = false; approvedKeyDestination = nil
         configs.resetDraft(to: baseline)
@@ -860,9 +880,9 @@ private final class SettingsGroupView: NSView {
 @MainActor private final class HotkeyRecorder: NSButton {
     var onCommit: ((String) -> Void)?
     private var recording = false
-    private let recordsSuperKey: Bool
+    private let allowsSuperKey: Bool
     private let originalValue: String
-    init(value: String, recordsSuperKey: Bool = false) { self.recordsSuperKey = recordsSuperKey; originalValue = value; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
+    init(value: String, allowsSuperKey: Bool = false) { self.allowsSuperKey = allowsSuperKey; originalValue = value; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
     override var intrinsicContentSize: NSSize {
         if recording || title == "Record Shortcut" { return NSSize(width: 146, height: 26) }
         let count = keycapLabels.count
@@ -896,15 +916,15 @@ private final class SettingsGroupView: NSView {
         guard recording else { super.keyDown(with: event); return }
         if event.keyCode == 53 { recording = false; title = originalValue.isEmpty ? "Record Shortcut" : originalValue; return }
         if event.keyCode == 51 || event.keyCode == 117 { recording = false; title = "Record Shortcut"; onCommit?(""); return }
-        if recordsSuperKey {
-            guard let value = formatSuperKeyBinding(keyCode: UInt32(event.keyCode)) else { NSSound.beep(); return }
-            recording = false; title = value; onCommit?(value)
-            return
-        }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         var modifiers: UInt32 = 0
         if flags.contains(.command) { modifiers |= UInt32(cmdKey) }; if flags.contains(.option) { modifiers |= UInt32(optionKey) }; if flags.contains(.control) { modifiers |= UInt32(controlKey) }; if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
-        guard modifiers != 0 else { NSSound.beep(); return }
+        if modifiers == 0 {
+            // A bare key only means something together with a Hyper Key.
+            guard allowsSuperKey, let value = formatSuperKeyBinding(keyCode: UInt32(event.keyCode)) else { NSSound.beep(); return }
+            recording = false; title = value; onCommit?(value)
+            return
+        }
         let value = formatHotkey(keyCode: UInt32(event.keyCode), modifiers: modifiers); recording = false; title = value; onCommit?(value)
     }
     func commitForJourney(_ value: String) { onCommit?(value) }
