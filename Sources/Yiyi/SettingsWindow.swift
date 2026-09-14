@@ -282,9 +282,7 @@ private enum SettingsPane: String, CaseIterable {
         chooser.widthAnchor.constraint(equalToConstant: 228).isActive = true
         chooser.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let selection = NSStackView(views: [chooser, add, remove]); selection.orientation = .horizontal; selection.spacing = 8
-        let hyper = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
-        hyper.toolTip = "Use a right-side modifier for yiyi, or choose External Hyper for an existing ⌃⌥⇧⌘ remap."
-        var sectionsList: [NSView] = [row("Hyper Key", hyper), row("Command", selection)]
+        var sectionsList: [NSView] = [row("Command", selection)]
         for (index, command) in configs.config.commands.enumerated() where index == selectedCommand {
             let name = field(command.name, id: "command.\(index).name")
             let hyperMode = shortcutModes[index] ?? (command.hotkey.hasPrefix("super+") || command.hotkey.hasPrefix("hyper+"))
@@ -373,20 +371,6 @@ private enum SettingsPane: String, CaseIterable {
         } else if !status.trusted {
             let enable = NSButton(title: "Enable Accessibility…", target: self, action: #selector(enableAccessibility)); enable.setAccessibilityIdentifier("permission.enable"); rows.append(row("", enable))
         }
-        let pointer = NSButton(checkboxWithTitle: "Press and hold (experimental)", target: self, action: #selector(changePointer(_:)))
-        pointer.state = configs.config.pointerTrigger.enabled ? .on : .off
-        pointer.isEnabled = !configs.config.commands.isEmpty
-        pointer.setAccessibilityIdentifier("pointer.enabled")
-        rows.append(row("Mouse / trackpad", pointer))
-        if configs.config.pointerTrigger.enabled {
-            let command = popup(configs.config.commands.map(\.name), selected: "", id: "pointer.command", action: #selector(changePointerCommand(_:)))
-            command.selectItem(at: configs.config.pointerTrigger.commandIndex)
-            let help = label("Press the trackpad or mouse button and hold still for half a second; the command starts while you hold. Uses the selection at press time, or the clipboard. Clicks and drags are unchanged.", secondary: true)
-            stretch(help)
-            rows += [row("Run command", command), row("", help), row("Gesture status", label(configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save", secondary: true))]
-            let permission = NSButton(title: "Input Monitoring Settings…", target: self, action: #selector(openInputMonitoring))
-            rows.append(row("", permission))
-        }
         rows.append(advancedToggle("system"))
         if expandedAdvanced.contains("system") {
             let tapStatus = status.superKeyTapStatus
@@ -402,7 +386,31 @@ private enum SettingsPane: String, CaseIterable {
             rows += [row("Leader key tap", tap), row("Signing identity", signature), row("Config file", files)]
         }
         appendError(for: "general", to: &rows)
-        return section("General", rows: rows)
+        return column([triggersSection(), section("General", rows: rows)], spacing: 24)
+    }
+    /// The two ways to start a command without a plain keyboard shortcut. Both are global, so they live here rather than per command.
+    private func triggersSection() -> NSView {
+        let hyper = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
+        hyper.toolTip = "Use a right-side modifier for yiyi, or choose External Hyper for an existing ⌃⌥⇧⌘ remap."
+        var rows = [row("Hyper Key", hyper)]
+        let hyperHelp = label(configs.config.superKey == .none ? "Off. Commands set to Hyper Key will not fire until you choose one." : "Commands can use Hyper Key + a letter as their shortcut.", secondary: true)
+        hyperHelp.maximumNumberOfLines = 0; hyperHelp.usesSingleLineMode = false; hyperHelp.lineBreakMode = .byWordWrapping; hyperHelp.preferredMaxLayoutWidth = controlWidth; hyperHelp.font = .systemFont(ofSize: 11)
+        stretch(hyperHelp); rows.append(row("", hyperHelp))
+        let pointer = NSButton(checkboxWithTitle: "Press and hold (experimental)", target: self, action: #selector(changePointer(_:)))
+        pointer.state = configs.config.pointerTrigger.enabled ? .on : .off
+        pointer.isEnabled = !configs.config.commands.isEmpty
+        pointer.setAccessibilityIdentifier("pointer.enabled")
+        rows.append(row("Mouse / trackpad", pointer))
+        if configs.config.pointerTrigger.enabled {
+            let command = popup(configs.config.commands.map(\.name), selected: "", id: "pointer.command", action: #selector(changePointerCommand(_:)))
+            command.selectItem(at: configs.config.pointerTrigger.commandIndex)
+            let help = label("Press the trackpad or mouse button and hold still for half a second; the command starts while you hold. Uses the selection at press time, or the clipboard. Clicks and drags are unchanged.", secondary: true)
+            stretch(help)
+            rows += [row("Run command", command), row("", help), row("Gesture status", label(configs.config.pointerTrigger == baseline.pointerTrigger ? pointerStatus() : "Applies after Save", secondary: true))]
+            let permission = NSButton(title: "Input Monitoring Settings…", target: self, action: #selector(openInputMonitoring))
+            rows.append(row("", permission))
+        }
+        return section("Triggers", rows: rows)
     }
 
     /// Disclosure row: power-user fields exist, but never greet a new user.
