@@ -290,23 +290,11 @@ private enum SettingsPane: String, CaseIterable {
             // the Hyper Key popup and the hold gesture are global but set where they are used.
             let superKey = configs.config.superKey
             let isHyper = command.hotkey.hasPrefix("super+") || command.hotkey.hasPrefix("hyper+")
-            let hasHyperKey = superKey != .none
-            let chord = HotkeyRecorder(value: isHyper ? "" : command.hotkey, mode: .chord); chord.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; chord.setAccessibilityIdentifier("command.\(index).hotkey")
-            let keyboardRow = triggerRow(symbol: "keyboard", control: chord, note: isHyper ? "Replaces the Hyper Key shortcut." : "")
-
-            let hyperKey = HotkeyRecorder(value: isHyper ? command.hotkey : "", mode: .superKey); hyperKey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hyperKey.setAccessibilityIdentifier("command.\(index).hyper-hotkey")
-            hyperKey.isEnabled = hasHyperKey
-            let hyper = popup(SuperKey.allCases.map(\.displayName), selected: superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
-            hyper.toolTip = "Applies to every command. A right-side modifier held for yiyi, or your existing ⌃⌥⇧⌘ remap."
-            hyper.widthAnchor.constraint(equalToConstant: 168).isActive = true
-            let hyperControls = NSStackView(views: [hyperKey, hyper]); hyperControls.orientation = .horizontal; hyperControls.spacing = 10
-            let hyperNote: String = switch superKey {
-                case .none: "Choose a Hyper Key first."
-                case .externalHyper: "Single key, with your external ⌃⌥⇧⌘."
-                default: isHyper ? "" : "Single key, held with \(superKey.displayName)."
-            }
-            let hyperRow = triggerRow(symbol: "command", control: hyperControls, note: hyperNote)
-
+            // One recorder. Pressing the Hyper Key itself (chosen in General) with a key records ◆ + key.
+            let chord = HotkeyRecorder(value: command.hotkey, superKey: superKey); chord.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; chord.setAccessibilityIdentifier("command.\(index).hotkey")
+            var keyboardNote = ""
+            if isHyper { keyboardNote = superKey == .none ? "Uses the Hyper Key, which is off. Turn it on in General." : "◆ is \(superKey.displayName), set in General." }
+            let keyboardRow = triggerRow(symbol: "keyboard", control: chord, note: keyboardNote, noteID: "command.\(index).hotkey-note")
             let ownsPointer = configs.config.pointerTrigger.enabled && configs.config.pointerTrigger.commandIndex == index
             let hold = NSButton(checkboxWithTitle: "Press and hold to run this command", target: self, action: #selector(changePointerOwner(_:))); hold.tag = index
             hold.state = ownsPointer ? .on : .off; hold.setAccessibilityIdentifier("command.\(index).pointer")
@@ -363,7 +351,7 @@ private enum SettingsPane: String, CaseIterable {
             let promptGroup = column([promptHeader, promptScroll, promptStatus], spacing: 8)
             // Advanced lives inside the command card, like the connection card, so the disclosure
             // never floats alone between sections.
-            var rows = [row("Name", name), row("Keyboard", keyboardRow), row("Hyper Key", hyperRow), row("Trackpad", trackpadRow), advancedToggle("command.\(index)")]
+            var rows = [row("Name", name), row("Keyboard", keyboardRow), row("Trackpad", trackpadRow), advancedToggle("command.\(index)")]
             if expandedAdvanced.contains("command.\(index)") {
                 if let override = command.provider, let connection = configs.config.providers[override] {
                     let reset = NSButton(title: "Use main connection", target: self, action: #selector(clearCommandConnection(_:))); reset.tag = index
@@ -392,7 +380,11 @@ private enum SettingsPane: String, CaseIterable {
         let copy = NSButton(checkboxWithTitle: "Copy translations to the clipboard", target: self, action: #selector(changeAutoCopy(_:))); copy.state = configs.config.autoCopy ? .on : .off; copy.setAccessibilityIdentifier("provider.auto-copy")
         let status = accessibilityStatus()
         let trusted = label(status.trusted ? "Accessibility trusted" : "Accessibility not granted", secondary: status.trusted); trusted.setAccessibilityIdentifier("permission.trusted"); trusted.setAccessibilityValue(status.trusted ? "yes" : "no")
-        var rows = [row("Clipboard", copy)]
+        let hyper = popup(SuperKey.allCases.map(\.displayName), selected: configs.config.superKey.displayName, id: "superkey.popup", action: #selector(changeSuperKey(_:)))
+        hyper.toolTip = "A right-side modifier reserved for yiyi. While recording a command shortcut, press it with a key to get ◆ + key. External Hyper uses an existing ⌃⌥⇧⌘ remap."
+        let hyperNote = label(configs.config.superKey == .none ? "Off. Right-side modifiers behave normally." : "Recording \(configs.config.superKey.displayName) + a key in a command shortcut gives ◆ + key.", secondary: true)
+        hyperNote.font = .systemFont(ofSize: 11); hyperNote.maximumNumberOfLines = 2; hyperNote.lineBreakMode = .byWordWrapping; hyperNote.preferredMaxLayoutWidth = controlWidth; stretch(hyperNote)
+        var rows = [row("Hyper Key", hyper), row("", hyperNote), row("Clipboard", copy)]
         if let launchAtLogin {
             let login = NSButton(checkboxWithTitle: "Open yiyi at login", target: self, action: #selector(changeLaunchAtLogin(_:)))
             login.state = launchAtLogin.get() ? .on : .off
@@ -425,7 +417,7 @@ private enum SettingsPane: String, CaseIterable {
     }
     /// Symbol · control · optional one-line note. Symbols adapt to dark mode; the website's deck
     /// pictures did not read well at this size.
-    private func triggerRow(symbol: String, control: NSView, note: String, trailing: NSView? = nil) -> NSView {
+    private func triggerRow(symbol: String, control: NSView, note: String, trailing: NSView? = nil, noteID: String? = nil) -> NSView {
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!.withSymbolConfiguration(.init(pointSize: 15, weight: .regular))!)
         icon.contentTintColor = .secondaryLabelColor
         icon.widthAnchor.constraint(equalToConstant: 22).isActive = true
@@ -434,6 +426,7 @@ private enum SettingsPane: String, CaseIterable {
         if !note.isEmpty || trailing != nil {
             let text = label(note, secondary: true); text.font = .systemFont(ofSize: 11)
             text.maximumNumberOfLines = 1; text.lineBreakMode = .byTruncatingTail
+            if let noteID { text.setAccessibilityIdentifier(noteID) }
             var noteViews: [NSView] = [text]
             if let trailing { noteViews.append(trailing) }
             let noteRow = NSStackView(views: noteViews); noteRow.orientation = .horizontal; noteRow.spacing = 10
@@ -883,13 +876,12 @@ private final class SettingsGroupView: NSView {
 @MainActor private final class HotkeyRecorder: NSButton {
     var onCommit: ((String) -> Void)?
     private var recording = false
-    enum Mode { case chord, superKey }
-    private let mode: Mode
+    private let superKey: SuperKey
     private let originalValue: String
-    private var idleTitle: String { mode == .superKey ? "Record Key" : "Record Shortcut" }
-    init(value: String, mode: Mode = .chord) { self.mode = mode; originalValue = value; super.init(frame: .zero); title = value.isEmpty ? (mode == .superKey ? "Record Key" : "Record Shortcut") : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
+    private var idleTitle: String { "Record Shortcut" }
+    init(value: String, superKey: SuperKey = .none) { self.superKey = superKey; originalValue = value; super.init(frame: .zero); title = value.isEmpty ? "Record Shortcut" : value; font = .monospacedSystemFont(ofSize: 11, weight: .regular); bezelStyle = .rounded; target = self; action = #selector(beginRecording) }
     override var intrinsicContentSize: NSSize {
-        if recording || title == idleTitle { return NSSize(width: mode == .superKey ? 96 : 146, height: 26) }
+        if recording || title == idleTitle { return NSSize(width: 146, height: 26) }
         let count = keycapLabels.count
         return NSSize(width: max(74, CGFloat(count) * 27 + CGFloat(max(0, count - 1)) * 4), height: 26)
     }
@@ -915,7 +907,7 @@ private final class SettingsGroupView: NSView {
         }
     }
     required init?(coder: NSCoder) { nil }
-    @objc private func beginRecording() { recording = true; title = mode == .superKey ? "Press a key…" : "Press shortcut…"; window?.makeFirstResponder(self) }
+    @objc private func beginRecording() { recording = true; title = "Press shortcut…"; window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
     override func keyDown(with event: NSEvent) {
         guard recording else { super.keyDown(with: event); return }
@@ -924,8 +916,11 @@ private final class SettingsGroupView: NSView {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         var modifiers: UInt32 = 0
         if flags.contains(.command) { modifiers |= UInt32(cmdKey) }; if flags.contains(.option) { modifiers |= UInt32(optionKey) }; if flags.contains(.control) { modifiers |= UInt32(controlKey) }; if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
-        if mode == .superKey {
-            guard modifiers == 0, let value = formatSuperKeyBinding(keyCode: UInt32(event.keyCode)) else { NSSound.beep(); return }
+        // The Hyper Key pressed with a key is its own binding, not a plain modifier chord.
+        let hyperModifiers = UInt32(cmdKey | shiftKey | optionKey | controlKey)
+        let leaderHeld = superKey.deviceFlag != 0 && event.modifierFlags.rawValue & UInt(superKey.deviceFlag) != 0
+        let isExternalHyper = superKey == .externalHyper && modifiers == hyperModifiers
+        if leaderHeld || isExternalHyper, let value = formatSuperKeyBinding(keyCode: UInt32(event.keyCode)) {
             recording = false; title = value; onCommit?(value)
             return
         }

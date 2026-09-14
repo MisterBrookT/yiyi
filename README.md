@@ -47,7 +47,7 @@ Each command has a name, shortcut, and prompt. Changes remain drafts until **Sav
 - `{clipboard}` / `{copy}` — clipboard text from before capture, without synthesizing Copy for clipboard-only prompts.
 - Insert buttons add highlighted tokens at the cursor. Unknown tokens such as `{selecton}` show an error.
 
-Each command card lists its three triggers: **Keyboard** (an ordinary modifier combination), **Hyper Key** (a single key paired with the Hyper Key chosen beside it: a right-side modifier, or an existing external **⌃⌥⇧⌘** remap; that choice applies to every command), and **Trackpad**. Selecting External Hyper does not remap Caps Lock or change system keyboard settings.
+Each command card has a **Keyboard** shortcut and a **Trackpad** checkbox. The shortcut recorder takes an ordinary modifier combination; if you have chosen a **Hyper Key** in General (a right-side modifier reserved for yiyi, or an existing external **⌃⌥⇧⌘** remap), pressing it with a key records **◆ + key** instead. Selecting External Hyper does not remap Caps Lock or change system keyboard settings.
 
 ## Mouse and trackpad
 
