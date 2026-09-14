@@ -223,8 +223,7 @@ import YiyiCore
         controller.prepareOffscreen(appearance: appearance)
         for title in ["Commands", "Connection", "General"] {
             try page(title)
-            let id = title == "General" ? "system.advanced" : "provider.advanced"
-            if let toggle = controller.control(accessibilityID: id) as? NSButton, toggle.state == .on { act(toggle) }
+            if title == "General", let toggle = controller.control(accessibilityID: "system.advanced") as? NSButton, toggle.state == .on { act(toggle) }
             try snapshot("\(appearance == light ? "light" : "dark")-\(title.lowercased())")
         }
     }

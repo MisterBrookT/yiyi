@@ -257,13 +257,9 @@ private enum SettingsPane: String, CaseIterable {
         let style = popup(APIStyle.allCases.map(\.displayName), selected: provider.apiStyle.displayName, id: "provider.api-style", action: #selector(providerStyle(_:)))
         style.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
         let effort = popup(ReasoningEffort.allCases.map(\.rawValue), selected: provider.reasoningEffort.rawValue, id: "provider.reasoning-effort", action: #selector(providerEffort(_:))); effort.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
+        // Key environment variable and temperature stay config-file-only; both are rare and
+        // documented in docs/configuration.md.
         var rows = [row("API", style), row("Base URL", baseURL), row("API key", keyRow), row("", status), row("Model", model), row("Reasoning", effort)]
-        rows.append(advancedToggle("provider"))
-        if expandedAdvanced.contains("provider") {
-            let env = field(provider.apiKeyEnv, id: "provider.api-key-env", mono: true)
-            let temperature = field(provider.temperature.map { String($0) } ?? "", id: "provider.temperature", mono: true); prosePlaceholder("Empty to omit", in: temperature)
-            rows += [row("Key environment", env), row("Temperature", temperature)]
-        }
         appendError(for: "provider", to: &rows)
         return section("Connection", rows: rows)
     }
@@ -644,7 +640,6 @@ private enum SettingsPane: String, CaseIterable {
         do {
             switch id {
             case "provider.base-url": try configs.setProvider(selectedProvider, baseURL: sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
-            case "provider.api-key-env": try configs.setProvider(selectedProvider, apiKeyEnv: sender.stringValue)
             case "provider.model": try configs.setProvider(selectedProvider, model: sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
             case "provider.api-key":
                 let entered = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -654,7 +649,6 @@ private enum SettingsPane: String, CaseIterable {
                     try configs.setProvider(selectedProvider, apiKey: .some(entered.isEmpty ? nil : entered))
                     keyWasEntered = !entered.isEmpty
                 }
-            case "provider.temperature": try configs.setProvider(selectedProvider, temperature: .some(try validateTemperature(sender.stringValue)))
             default:
                 let parts = id.split(separator: ".").map(String.init)
                 if parts.count == 3, parts[0] == "command", let index = Int(parts[1]) {
