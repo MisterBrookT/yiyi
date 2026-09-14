@@ -170,11 +170,32 @@
           <li>Your own endpoint</li>
           <li>Native macOS</li>
         </ul>
-        <a
-          class="button primary"
-          href="https://github.com/MisterBrookT/yiyi#install"
-          >Get yiyi</a
-        >
+        <div class="install" role="group" aria-labelledby="install-label">
+          <span id="install-label" class="install-label"
+            >Install from Terminal</span
+          >
+          <div class="install-row">
+            <code id="install-command"
+              >curl -fsSL https://misterbrookt.github.io/yiyi/install.sh |
+              bash</code
+            >
+            <button
+              type="button"
+              class="copy"
+              data-copy="#install-command"
+              aria-label="Copy install command"
+            >
+              Copy
+            </button>
+          </div>
+          <p class="install-note">
+            Builds from source on your Mac. Needs macOS 14 and Xcode Command
+            Line Tools.
+            <a href="https://github.com/MisterBrookT/yiyi#install"
+              >Read the script</a
+            >.
+          </p>
+        </div>
       </section>
     </main>
 
@@ -186,6 +207,19 @@
       </div>
     </footer>
     <script>
+      document.querySelectorAll("[data-copy]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const source = document.querySelector(button.dataset.copy);
+          if (!source) return;
+          try {
+            await navigator.clipboard.writeText(source.textContent.trim());
+            button.textContent = "Copied";
+            setTimeout(() => (button.textContent = "Copy"), 1600);
+          } catch {
+            button.textContent = "Select and copy";
+          }
+        });
+      });
       (() => {
         const reel = document.getElementById("reel");
         if (!reel) return;
