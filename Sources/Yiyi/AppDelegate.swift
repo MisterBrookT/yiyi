@@ -22,6 +22,7 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
     )
     private var statusItem: NSStatusItem!
     private var requests = LatestRequest()
+    private var clipboardCache = ClipboardTranslationCache()
     private var isCapturing = false
     private var accessibilityPollTimer: Timer?
 
@@ -127,6 +128,7 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
         // invocation; no launch-time value is used to decide whether synthetic copy is allowed.
         let accessibility = AccessibilityState.observe()
         startAccessibilityPollingIfNeeded(trusted: accessibility.trusted)
+        let clipboardCount = NSPasteboard.general.changeCount
         let clipboard = NSPasteboard.general.string(forType: .string).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         Task {
             let capture: CaptureDecision
@@ -136,7 +138,7 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
             isCapturing = false
             guard requests.isCurrent(requestID) else { return }
             appLogger.notice("capture completed source=\(capture.source.rawValue, privacy: .public) hasText=\(capture.text != nil)")
-            guard let input = capture.text else {
+            guard let capturedInput = capture.text else {
                 if accessibility.trusted {
                     panel.showError(command: command.name, message: "No selected or clipboard text found")
                 } else {
@@ -148,21 +150,44 @@ private let appLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "dispat
                 }
                 return
             }
+            // Selection requests continue to use their actual selection. Cache only
+            // clipboard captures, including explicitly clipboard-only prompts.
+            let usesClipboard = capture.source == .clipboard
+            let input = usesClipboard
+                ? clipboardCache.input(for: capturedInput, changeCount: clipboardCount)
+                : capturedInput
+            let promptClipboard = usesClipboard ? input : clipboard
+            let displayCapture = CaptureDecision(text: input, source: capture.source, hint: capture.hint)
+            if usesClipboard, let cached = clipboardCache.lookup(input: input, commandIndex: index, config: frozen.config) {
+                panel.showLoading(command: command.name, capture: displayCapture)
+                panel.showResult(cached.text)
+                if autoCopy {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(cached.text, forType: .string)
+                    clipboardCache.markClipboardWrite(text: cached.text, changeCount: NSPasteboard.general.changeCount)
+                }
+                return
+            }
             do {
                 let (provider, key) = try resolution.get()
                 panel.showLoading(
                     command: command.name,
-                    capture: capture,
+                    capture: displayCapture,
                     relaunch: accessibility.trusted ? nil : { [weak self] in self?.relaunch() }
                 )
-                let prompt = try renderPrompt(command.prompt, input: input, clipboard: clipboard)
+                let prompt = try renderPrompt(command.prompt, input: input, clipboard: promptClipboard)
                 let result = try await OpenAIClient().complete(prompt: prompt, provider: provider, apiKey: key)
                 guard requests.isCurrent(requestID) else { return }
                 appLogger.notice("provider completed characters=\(result.count)")
+                if usesClipboard {
+                    clipboardCache.begin(input: input, commandIndex: index, config: frozen.config)
+                    clipboardCache.store(text: result)
+                }
                 if autoCopy {
                     let before = NSPasteboard.general.changeCount
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(result, forType: .string)
+                    if usesClipboard { clipboardCache.markClipboardWrite(text: result, changeCount: NSPasteboard.general.changeCount) }
                     appLogger.notice("changeCount \(before)->\(NSPasteboard.general.changeCount) entity=autoCopy")
                 }
                 panel.showResult(result)

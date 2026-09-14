@@ -2,6 +2,32 @@ import XCTest
 @testable import YiyiCore
 
 final class YiyiCoreTests: XCTestCase {
+    func testClipboardCacheMatchesTextAndConfiguration() {
+        var cache = ClipboardTranslationCache()
+        let config = YiyiConfig()
+        cache.begin(input: "original", commandIndex: 0, config: config)
+        XCTAssertNil(cache.lookup(input: "original", commandIndex: 0, config: config))
+        cache.store(text: "draft")
+        XCTAssertEqual(cache.lookup(input: "original", commandIndex: 0, config: config)?.text, "draft")
+        XCTAssertNil(cache.lookup(input: "changed", commandIndex: 0, config: config))
+        XCTAssertNil(cache.lookup(input: "original", commandIndex: 1, config: config))
+        var changed = config; changed.commands[0].prompt = "New prompt"
+        XCTAssertNil(cache.lookup(input: "original", commandIndex: 0, config: changed))
+        changed = config; changed.providers[config.defaultProvider]?.model = "other-model"
+        XCTAssertNil(cache.lookup(input: "original", commandIndex: 0, config: changed))
+    }
+
+    func testOwnClipboardWriteReusesSourceButNewCopyDoesNot() {
+        var cache = ClipboardTranslationCache()
+        cache.begin(input: "source", commandIndex: 0, config: YiyiConfig())
+        cache.store(text: "translation")
+        cache.markClipboardWrite(text: "translation", changeCount: 12)
+        XCTAssertEqual(cache.input(for: "translation", changeCount: 12), "source")
+        XCTAssertEqual(cache.input(for: "translation", changeCount: 13), "translation")
+        XCTAssertEqual(cache.input(for: "new text", changeCount: 12), "new text")
+    }
+
+
 
     func testAccessibilityAdviceMatrix() {
         XCTAssertEqual(accessibilityAdvice(trusted: true, hasPrompted: false, repairAttempted: false, grantedSignature: nil, currentSignature: "current"), .ok)
