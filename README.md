@@ -18,13 +18,13 @@ This is a source-build release, not a notarized download. Text is sent to your c
 
 ## Install
 
-Requires macOS 14+ and a Swift 6 toolchain (current Xcode Command Line Tools or Xcode).
+Requires macOS 14+.
 
 ```sh
 curl -fsSL https://misterbrookt.github.io/yiyi/install.sh | bash
 ```
 
-This fetches the source into `~/Library/Caches/yiyi/src` and runs the repository's `install.sh`. Run the same line again to update. Prefer to read first? Clone and run it yourself:
+yiyi is compiled on your Mac. If Apple's Command Line Tools are missing, the script installs them first (macOS asks you to confirm once), then fetches the source into `~/Library/Caches/yiyi/src`, builds, and launches. Run the same line again to update. Prefer to read first? Clone and run it yourself (needs a Swift 6 toolchain):
 
 ```sh
 git clone https://github.com/MisterBrookT/yiyi.git

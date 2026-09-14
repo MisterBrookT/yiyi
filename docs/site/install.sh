@@ -15,8 +15,26 @@ fail() { printf 'yiyi: %s\n' "$*" >&2; exit 1; }
 
 [[ "$(uname)" == Darwin ]] || fail "yiyi is macOS only."
 [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 14 ]] || fail "yiyi needs macOS 14 or newer."
-command -v git >/dev/null || fail "git is required. Install Xcode Command Line Tools: xcode-select --install"
-command -v swift >/dev/null || fail "swift is required. Install Xcode Command Line Tools: xcode-select --install"
+# yiyi is compiled on this Mac, which needs Apple's Command Line Tools (git + swift). On a
+# stock macOS they are missing; ask macOS to install them, then wait, so the one-liner still
+# finishes on its own without a second run.
+have_tools() { xcode-select -p >/dev/null 2>&1 && command -v swift >/dev/null && swift --version >/dev/null 2>&1; }
+if ! have_tools; then
+  say "Installing Apple's Command Line Tools (a system dialog will ask you to confirm)"
+  # Trigger the softwareupdate path so it installs without opening Xcode.
+  touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+  label="$(softwareupdate -l 2>/dev/null | grep -o 'Command Line Tools for Xcode-[0-9.]*' | tail -1 || true)"
+  if [[ -n "$label" ]]; then
+    softwareupdate -i "$label" --verbose || true
+  else
+    xcode-select --install 2>/dev/null || true
+    printf 'Waiting for the Command Line Tools to finish installing'
+    until have_tools; do printf '.'; sleep 10; done
+    echo
+  fi
+  rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+  have_tools || fail "Command Line Tools did not install. Run: xcode-select --install, then rerun this command."
+fi
 
 mkdir -p "$(dirname "$SRC")"
 if [[ -d "$SRC/.git" ]]; then
