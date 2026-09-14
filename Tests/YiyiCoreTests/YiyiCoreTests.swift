@@ -619,29 +619,24 @@ final class YiyiCoreTests: XCTestCase {
         XCTAssertTrue(gesture.consume(pointer(.held, 2.45, 0, 0)))
     }
 
-    func testPointerHoldCancelsForLostModifierAndExtraButton() {
-        for cancellation in [
-            pointer(.moved, 0.2, 0, 0, modifier: false),
-            pointer(.cancel, 0.2, 0, 0)
-        ] {
-            var gesture = PointerGestureRecognizer(enabled: true)
-            XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
-            XCTAssertFalse(gesture.consume(cancellation))
-            XCTAssertFalse(gesture.consume(pointer(.held, 1, 0, 0)))
-            XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1, 0, 0)))
-        }
-        var released = PointerGestureRecognizer(enabled: true)
-        XCTAssertFalse(released.consume(pointer(.primaryDown, 0, 0, 0)))
-        XCTAssertFalse(released.consume(pointer(.held, 0.5, 0, 0, modifier: false)))
+    func testPointerHoldCancelsForExtraButton() {
+        var gesture = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(gesture.consume(pointer(.primaryDown, 0, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.cancel, 0.2, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.held, 1, 0, 0)))
+        XCTAssertFalse(gesture.consume(pointer(.primaryUp, 1, 0, 0)))
     }
 
-    func testPointerHoldRequiresModifierAndRespectsDisabledState() {
+    func testPointerHoldIgnoresModifierStateAndRespectsDisabledState() {
         var disabled = PointerGestureRecognizer()
         XCTAssertFalse(disabled.consume(pointer(.primaryDown, 0, 0, 0)))
         XCTAssertFalse(disabled.consume(pointer(.held, 1, 0, 0)))
-        var missingModifier = PointerGestureRecognizer(enabled: true)
-        XCTAssertFalse(missingModifier.consume(pointer(.primaryDown, 0, 0, 0, modifier: false)))
-        XCTAssertFalse(missingModifier.consume(pointer(.held, 1, 0, 0)))
+        var plain = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(plain.consume(pointer(.primaryDown, 0, 0, 0, modifier: false)))
+        XCTAssertTrue(plain.consume(pointer(.held, 0.5, 0, 0, modifier: false)))
+        var withOption = PointerGestureRecognizer(enabled: true)
+        XCTAssertFalse(withOption.consume(pointer(.primaryDown, 0, 0, 0, modifier: true)))
+        XCTAssertTrue(withOption.consume(pointer(.held, 0.5, 0, 0, modifier: false)))
     }
 
     private func pointer(_ kind: PointerGestureEvent.Kind, _ time: TimeInterval, _ x: Double, _ y: Double, modifier: Bool = true) -> PointerGestureEvent {

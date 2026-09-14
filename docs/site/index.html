@@ -109,7 +109,7 @@
             <img
               src="assets/scene-shortcut.png"
               width="1012"
-              height="492"
+              height="512"
               alt="A selected sentence in a reading window, translated by yiyi after a keyboard shortcut"
               fetchpriority="high"
             />
@@ -119,23 +119,43 @@
             <img
               src="assets/scene-hold.png"
               width="1012"
-              height="492"
-              alt="The same translation triggered by holding Option and pressing the trackpad"
+              height="512"
+              alt="The same translation triggered by pressing and holding the trackpad"
             />
             <figcaption>
-              Or hold Option and press the trackpad. No keyboard.
+              Or just press and hold the trackpad. No keyboard.
             </figcaption>
           </figure>
           <figure class="slide" id="slide-commands">
             <img
               src="assets/scene-commands.png"
               width="1012"
-              height="492"
+              height="512"
               alt="yiyi's Commands settings, showing a translation prompt with a highlighted selection placeholder"
             />
             <figcaption>Your prompts, your shortcuts, your model.</figcaption>
           </figure>
         </div>
+        <button
+          class="reel-arrow prev"
+          type="button"
+          aria-label="Previous slide"
+          data-step="-1"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 5l-7 7 7 7" />
+          </svg>
+        </button>
+        <button
+          class="reel-arrow next"
+          type="button"
+          aria-label="Next slide"
+          data-step="1"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
         <nav class="reel-nav" aria-label="Slides">
           <a href="#slide-shortcut" aria-label="Shortcut"></a
           ><a href="#slide-hold" aria-label="Hold"></a
@@ -168,29 +188,90 @@
     <script>
       (() => {
         const reel = document.getElementById("reel");
+        if (!reel) return;
+        const slides = [...reel.children];
         const dots = [...document.querySelectorAll(".reel-nav a")];
-        if (!reel || !("IntersectionObserver" in window)) return;
-        const observer = new IntersectionObserver(
-          (entries) => {
-            for (const entry of entries) {
-              if (!entry.isIntersecting) continue;
-              const id = "#" + entry.target.id;
-              for (const dot of dots)
-                dot.getAttribute("href") === id
-                  ? dot.setAttribute("aria-current", "true")
-                  : dot.removeAttribute("aria-current");
-            }
-          },
-          { root: reel, threshold: 0.6 },
-        );
-        for (const slide of reel.children) observer.observe(slide);
-        for (const dot of dots)
-          dot.addEventListener("click", (event) => {
-            const target = document.querySelector(dot.getAttribute("href"));
-            if (!target) return;
-            event.preventDefault();
-            target.scrollIntoView({ block: "nearest", inline: "center" });
+        const arrows = [...document.querySelectorAll(".reel-arrow")];
+        const section = reel.closest("section");
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let current = 0;
+        let timer = null;
+
+        const mark = () => {
+          dots.forEach((dot, i) =>
+            i === current
+              ? dot.setAttribute("aria-current", "true")
+              : dot.removeAttribute("aria-current"),
+          );
+        };
+        const show = (index) => {
+          current = (index + slides.length) % slides.length;
+          reel.scrollTo({
+            left: slides[current].offsetLeft - reel.offsetLeft,
+            behavior: reduced ? "auto" : "smooth",
           });
+          mark();
+        };
+        const stop = () => {
+          clearInterval(timer);
+          timer = null;
+        };
+        const play = () => {
+          if (reduced || timer || document.hidden) return;
+          timer = setInterval(() => show(current + 1), 5000);
+        };
+        const restart = () => {
+          stop();
+          play();
+        };
+
+        if ("IntersectionObserver" in window) {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries)
+                if (entry.isIntersecting) {
+                  current = slides.indexOf(entry.target);
+                  mark();
+                }
+            },
+            { root: reel, threshold: 0.6 },
+          );
+          slides.forEach((slide) => observer.observe(slide));
+        }
+        dots.forEach((dot, i) =>
+          dot.addEventListener("click", (event) => {
+            event.preventDefault();
+            show(i);
+            restart();
+          }),
+        );
+        for (const arrow of arrows)
+          arrow.addEventListener("click", () => {
+            show(current + Number(arrow.dataset.step));
+            restart();
+          });
+        reel.addEventListener("keydown", (event) => {
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            show(current + 1);
+            restart();
+          }
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            show(current - 1);
+            restart();
+          }
+        });
+        section.addEventListener("pointerenter", stop);
+        section.addEventListener("pointerleave", play);
+        section.addEventListener("focusin", stop);
+        section.addEventListener("focusout", play);
+        reel.addEventListener("touchstart", stop, { passive: true });
+        document.addEventListener("visibilitychange", () =>
+          document.hidden ? stop() : play(),
+        );
+        mark();
+        play();
       })();
     </script>
   </body>

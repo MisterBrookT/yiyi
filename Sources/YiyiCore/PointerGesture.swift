@@ -19,7 +19,8 @@ public struct PointerTriggerConfig: Codable, Equatable, Sendable {
 
 public struct PointerGestureEvent: Equatable, Sendable {
     /// `.held` is a clock tick posted by the caller once the minimum duration has elapsed
-    /// since the press; it carries the current pointer location and modifier state.
+    /// since the press; it carries the current pointer location. `modifierHeld` is kept for
+    /// callers and older configs but no longer gates the gesture.
     public enum Kind: Equatable, Sendable { case primaryDown, moved, held, primaryUp, cancel }
     public let kind: Kind
     public let timestamp: TimeInterval
@@ -36,7 +37,8 @@ public struct PointerGestureEvent: Equatable, Sendable {
     }
 }
 
-/// Recognizes one deliberate Option-primary-button hold while leaving event delivery to the caller.
+/// Recognizes one deliberate primary-button hold while leaving event delivery to the caller.
+/// No modifier is needed: press and keep still. Dragging or a second button cancels.
 /// The gesture fires while the button is still down, so the user sees the command start and
 /// then lets go; the release afterwards is inert.
 public struct PointerGestureRecognizer: Sendable {
@@ -66,14 +68,13 @@ public struct PointerGestureRecognizer: Sendable {
         switch event.kind {
         case .primaryDown:
             guard !cancelledUntilRelease else { return false }
-            guard event.modifierHeld else { cancel(); return false }
             start = event
             fired = false
         case .moved:
             guard let start, !fired else { return false }
-            guard event.modifierHeld, distance(from: start, to: event) <= Self.maximumTravel else { cancel(); return false }
+            guard distance(from: start, to: event) <= Self.maximumTravel else { cancel(); return false }
         case .held:
-            guard let start, !fired, !cancelledUntilRelease, event.modifierHeld,
+            guard let start, !fired, !cancelledUntilRelease,
                   distance(from: start, to: event) <= Self.maximumTravel,
                   event.timestamp - start.timestamp >= Self.minimumDuration - 0.0005 else { return false }
             fired = true

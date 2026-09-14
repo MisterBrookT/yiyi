@@ -51,9 +51,9 @@ Each command has a name, shortcut, and prompt. Changes remain drafts until **Sav
 
 ## Mouse and trackpad
 
-In **General**, opt into **Option + click-and-hold** and choose its command. Hold **⌥** and the primary button still for about half a second; the command starts while you are still holding, and you can let go once the panel appears.
+In **General**, opt into **Press and hold** and choose its command. Select text, then press the trackpad or mouse button and hold still for about half a second; the command starts while you are still holding, and you can let go once the panel appears.
 
-The experimental gesture uses the selection at press time when Accessibility can read it quickly; otherwise it uses the clipboard. Dragging, releasing Option, or another button cancels it. It never consumes normal pointer events. Input Monitoring permission may also be required. It stays **off by default**.
+The experimental gesture uses the selection at press time when Accessibility can read it quickly; otherwise it uses the clipboard. Dragging or another button cancels it. It never consumes normal pointer events. Input Monitoring permission may also be required. It stays **off by default**.
 
 ## Configuration and privacy
 

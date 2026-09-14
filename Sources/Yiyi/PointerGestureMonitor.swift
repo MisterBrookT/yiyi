@@ -36,7 +36,7 @@ import YiyiCore
             let timestamp = event.timestamp
             let location = event.location
             let optionHeld = event.flags.contains(.maskAlternate)
-            let snapshot = type == .leftMouseDown && optionHeld ? PointerGestureMonitor.selectedTextSnapshot() : nil
+            let snapshot = type == .leftMouseDown ? PointerGestureMonitor.selectedTextSnapshot() : nil
             DispatchQueue.main.async { [weak monitor] in
                 monitor?.consume(type: type, timestamp: timestamp, location: location, optionHeld: optionHeld, snapshot: snapshot)
             }
@@ -49,7 +49,7 @@ import YiyiCore
         source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        status = isEnabled ? "Ready — hold Option and primary click" : "Unavailable — event listener disabled"
+        status = isEnabled ? "Ready — press and hold the trackpad or mouse button" : "Unavailable — event listener disabled"
     }
 
     func stop() {

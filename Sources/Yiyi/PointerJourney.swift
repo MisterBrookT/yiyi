@@ -40,16 +40,14 @@ import YiyiCore
         try await Task.sleep(for: .milliseconds(150))
     }
     defer { post(.leftMouseUp, option: false) }
-    try await gesture(option: false, duration: 500)
-    guard captures.isEmpty else { throw pointerFailure("Ordinary click triggered a command") }
-    try await gesture(option: true, duration: 100)
+    try await gesture(option: false, duration: 100)
     guard captures.isEmpty else { throw pointerFailure("Short click triggered a command") }
-    try await gesture(option: true, duration: 500, drag: true)
+    try await gesture(option: false, duration: 500, drag: true)
     guard captures.isEmpty else { throw pointerFailure("Dragging triggered a command") }
-    try await gesture(option: true, duration: 700)
+    try await gesture(option: false, duration: 700)
     guard captures.count == 1 else { throw pointerFailure("Expected exactly one real event-tap dispatch; got \(captures.count)") }
     guard firedBeforeRelease else { throw pointerFailure("Command did not start while the button was still held") }
     guard captures[0] == editor.string else { throw pointerFailure("Selection at press time was not preserved") }
-    print("PASS: real pointer event tap; ordinary/short/drag ignored; fires once while still held, release inert; original selection preserved")
+    print("PASS: real pointer event tap; short click and drag ignored; fires once while still held, release inert; original selection preserved")
 }
 private func pointerFailure(_ message: String) -> NSError { NSError(domain: "PointerJourney", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }

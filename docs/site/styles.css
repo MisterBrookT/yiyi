@@ -154,7 +154,45 @@ a {
     linear-gradient(180deg, rgb(255 255 255 / 0) 42%, #fff 100%);
 }
 .showcase {
+  position: relative;
   margin-bottom: 128px;
+}
+.reel-arrow {
+  position: absolute;
+  top: calc(50% - 60px);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+.reel-arrow:hover,
+.reel-arrow:focus-visible {
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.04);
+}
+.reel-arrow svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.reel-arrow.prev {
+  left: -12px;
+}
+.reel-arrow.next {
+  right: -12px;
 }
 .reel {
   display: flex;
@@ -354,6 +392,9 @@ code {
   }
   .reel {
     gap: 12px;
+  }
+  .reel-arrow {
+    display: none;
   }
   .slide figcaption {
     font-size: 14px;
