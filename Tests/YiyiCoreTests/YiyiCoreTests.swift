@@ -643,6 +643,70 @@ final class YiyiCoreTests: XCTestCase {
         PointerGestureEvent(kind: kind, timestamp: time, x: x, y: y, modifierHeld: modifier)
     }
 
+    func testAnthropicBodyMapsEffortToThinkingBudgetAndOmitsTemperatureWhenThinking() throws {
+        let plain = ResolvedProvider(name: "claude", baseURL: "https://api.anthropic.com/v1", model: "claude-sonnet-4-5", apiKeyEnv: "ANTHROPIC_API_KEY", temperature: 0.3, apiStyle: .anthropic)
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: buildAnthropicMessagesBody(prompt: "hello", provider: plain)) as? [String: Any])
+        XCTAssertEqual(body["model"] as? String, "claude-sonnet-4-5")
+        XCTAssertEqual(body["max_tokens"] as? Int, 4096)
+        XCTAssertEqual(body["temperature"] as? Double, 0.3)
+        XCTAssertNil(body["thinking"])
+        XCTAssertNil(body["reasoning_effort"])
+        let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
+        XCTAssertEqual(messages, [["role": "user", "content": "hello"]])
+
+        let thinking = ResolvedProvider(name: "claude", baseURL: "https://api.anthropic.com/v1", model: "claude-sonnet-4-5", apiKeyEnv: "ANTHROPIC_API_KEY", temperature: 0.3, reasoningEffort: .medium, apiStyle: .anthropic)
+        let thinkingBody = try XCTUnwrap(try JSONSerialization.jsonObject(with: buildAnthropicMessagesBody(prompt: "hello", provider: thinking)) as? [String: Any])
+        let block = try XCTUnwrap(thinkingBody["thinking"] as? [String: Any])
+        XCTAssertEqual(block["type"] as? String, "enabled")
+        XCTAssertEqual(block["budget_tokens"] as? Int, 8192)
+        XCTAssertEqual(thinkingBody["max_tokens"] as? Int, 4096 + 8192)
+        XCTAssertNil(thinkingBody["temperature"])
+    }
+
+    func testAnthropicResponseParsingJoinsTextBlocksAndSurfacesErrors() throws {
+        XCTAssertEqual(
+            try parseAnthropicMessage(Data(#"{"content":[{"type":"thinking","thinking":"..."},{"type":"text","text":"你"},{"type":"text","text":"好"}],"stop_reason":"end_turn"}"#.utf8)),
+            "你好"
+        )
+        XCTAssertThrowsError(try parseAnthropicMessage(Data(#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#.utf8))) {
+            XCTAssertEqual($0 as? OpenAIError, .provider("invalid x-api-key"))
+        }
+        XCTAssertThrowsError(try parseAnthropicMessage(Data(#"{"content":[],"stop_reason":"max_tokens"}"#.utf8))) {
+            XCTAssertEqual($0 as? OpenAIError, .truncated)
+        }
+        XCTAssertThrowsError(try parseAnthropicMessage(Data(#"{"content":[],"stop_reason":"end_turn"}"#.utf8))) {
+            XCTAssertEqual($0 as? OpenAIError, .emptyResponse)
+        }
+    }
+
+    func testCompletionRequestUsesProtocolSpecificPathAndHeaders() throws {
+        let openAI = ResolvedProvider(name: "x", baseURL: "http://127.0.0.1:11436/v1", model: "m", apiKeyEnv: "K")
+        let a = try buildCompletionRequest(prompt: "p", provider: openAI, apiKey: "secret")
+        XCTAssertEqual(a.url?.absoluteString, "http://127.0.0.1:11436/v1/chat/completions")
+        XCTAssertEqual(a.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+        XCTAssertNil(a.value(forHTTPHeaderField: "x-api-key"))
+
+        let anthropic = ResolvedProvider(name: "c", baseURL: "https://api.anthropic.com/v1", model: "m", apiKeyEnv: "K", apiStyle: .anthropic)
+        let b = try buildCompletionRequest(prompt: "p", provider: anthropic, apiKey: "secret")
+        XCTAssertEqual(b.url?.absoluteString, "https://api.anthropic.com/v1/messages")
+        XCTAssertEqual(b.value(forHTTPHeaderField: "x-api-key"), "secret")
+        XCTAssertEqual(b.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+        XCTAssertNil(b.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(b.httpMethod, "POST")
+    }
+
+    func testAPIStyleDefaultsToOpenAIAndStaysOutOfExistingFiles() throws {
+        let legacy = try JSONDecoder().decode(ProviderConfig.self, from: Data(#"{"baseURL":"http://x/v1","model":"m","apiKeyEnv":"K"}"#.utf8))
+        XCTAssertEqual(legacy.apiStyle, .openAI)
+        let encoded = String(decoding: try JSONEncoder().encode(legacy), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("apiStyle"))
+        var claude = legacy; claude.apiStyle = .anthropic
+        let roundTrip = try JSONDecoder().decode(ProviderConfig.self, from: JSONEncoder().encode(claude))
+        XCTAssertEqual(roundTrip.apiStyle, .anthropic)
+        let resolved = try resolveProvider(config: YiyiConfig(defaultProvider: "c", providers: ["c": claude], commands: [CommandConfig(name: "t", hotkey: "cmd+1", prompt: "{selection}")]), command: CommandConfig(name: "t", hotkey: "cmd+1", prompt: "{selection}"))
+        XCTAssertEqual(resolved.apiStyle, .anthropic)
+    }
+
     func testPointerPartialConfigUsesSafeDefaults() throws {
         let partial = try JSONDecoder().decode(YiyiConfig.self, from: Data(#"{"pointerTrigger":{}}"#.utf8))
         XCTAssertEqual(partial.pointerTrigger, PointerTriggerConfig())

@@ -4,6 +4,25 @@ public enum ReasoningEffort: String, Codable, Sendable, CaseIterable {
     case none, minimal, low, medium, high
 }
 
+/// Which wire protocol a connection speaks. Prompts and commands are the same either way.
+public enum APIStyle: String, Codable, Sendable, CaseIterable {
+    case openAI = "openai"
+    case anthropic = "anthropic"
+
+    public var displayName: String {
+        switch self {
+        case .openAI: "OpenAI-compatible"
+        case .anthropic: "Anthropic"
+        }
+    }
+    public var defaultBaseURL: String {
+        switch self {
+        case .openAI: "https://api.openai.com/v1"
+        case .anthropic: "https://api.anthropic.com/v1"
+        }
+    }
+}
+
 public enum ProviderGroup: String, CaseIterable, Sendable {
     case deepseek = "DeepSeek"
     case qwen = "Qwen"
@@ -26,6 +45,7 @@ public struct ProviderConfig: Codable, Equatable, Sendable {
     public var apiKey: String?
     public var temperature: Double?
     public var reasoningEffort: ReasoningEffort
+    public var apiStyle: APIStyle
 
     public init(
         baseURL: String,
@@ -33,7 +53,8 @@ public struct ProviderConfig: Codable, Equatable, Sendable {
         apiKeyEnv: String,
         apiKey: String? = nil,
         temperature: Double? = nil,
-        reasoningEffort: ReasoningEffort = .none
+        reasoningEffort: ReasoningEffort = .none,
+        apiStyle: APIStyle = .openAI
     ) {
         self.baseURL = baseURL
         self.model = model
@@ -41,10 +62,11 @@ public struct ProviderConfig: Codable, Equatable, Sendable {
         self.apiKey = apiKey
         self.temperature = temperature
         self.reasoningEffort = reasoningEffort
+        self.apiStyle = apiStyle
     }
 
     enum CodingKeys: String, CodingKey {
-        case baseURL, model, apiKeyEnv, apiKey, temperature, reasoningEffort
+        case baseURL, model, apiKeyEnv, apiKey, temperature, reasoningEffort, apiStyle
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,6 +77,20 @@ public struct ProviderConfig: Codable, Equatable, Sendable {
         apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
         temperature = try c.decodeIfPresent(Double.self, forKey: .temperature)
         reasoningEffort = try c.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort) ?? .none
+        // Older configs predate the field; they were all OpenAI-style.
+        apiStyle = try c.decodeIfPresent(APIStyle.self, forKey: .apiStyle) ?? .openAI
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(baseURL, forKey: .baseURL)
+        try c.encode(model, forKey: .model)
+        try c.encode(apiKeyEnv, forKey: .apiKeyEnv)
+        try c.encodeIfPresent(apiKey, forKey: .apiKey)
+        try c.encodeIfPresent(temperature, forKey: .temperature)
+        try c.encode(reasoningEffort, forKey: .reasoningEffort)
+        // Keep existing files byte-stable: only write the style when it is not the default.
+        if apiStyle != .openAI { try c.encode(apiStyle, forKey: .apiStyle) }
     }
 }
 
@@ -172,6 +208,7 @@ public struct ResolvedProvider: Equatable, Sendable {
     public let apiKeyEnv: String
     public let temperature: Double?
     public let reasoningEffort: ReasoningEffort
+    public let apiStyle: APIStyle
 
     public init(
         name: String,
@@ -179,7 +216,8 @@ public struct ResolvedProvider: Equatable, Sendable {
         model: String,
         apiKeyEnv: String,
         temperature: Double? = nil,
-        reasoningEffort: ReasoningEffort = .none
+        reasoningEffort: ReasoningEffort = .none,
+        apiStyle: APIStyle = .openAI
     ) {
         self.name = name
         self.baseURL = baseURL
@@ -187,6 +225,7 @@ public struct ResolvedProvider: Equatable, Sendable {
         self.apiKeyEnv = apiKeyEnv
         self.temperature = temperature
         self.reasoningEffort = reasoningEffort
+        self.apiStyle = apiStyle
     }
 }
 
@@ -210,7 +249,8 @@ public func resolveProvider(config: YiyiConfig, command: CommandConfig) throws -
         model: command.model ?? provider.model,
         apiKeyEnv: provider.apiKeyEnv,
         temperature: provider.temperature,
-        reasoningEffort: command.reasoningEffort ?? provider.reasoningEffort
+        reasoningEffort: command.reasoningEffort ?? provider.reasoningEffort,
+        apiStyle: provider.apiStyle
     )
 }
 

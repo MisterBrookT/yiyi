@@ -79,10 +79,12 @@ import YiyiCore
         apiKeyEnv: String? = nil,
         apiKey: String?? = nil,
         temperature: Double?? = nil,
-        reasoningEffort: ReasoningEffort? = nil
+        reasoningEffort: ReasoningEffort? = nil,
+        apiStyle: APIStyle? = nil
     ) throws {
         try update {
             guard var provider = $0.providers[name] else { return }
+            if let apiStyle { provider.apiStyle = apiStyle }
             if let baseURL { provider.baseURL = baseURL }
             if let model { provider.model = model }
             if let apiKeyEnv { provider.apiKeyEnv = apiKeyEnv }

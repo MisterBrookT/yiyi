@@ -15,7 +15,7 @@
 
 ## About
 
-yiyi translates selected text without switching apps. Bring an OpenAI-compatible endpoint, save your prompts as commands, and invoke them with a keyboard shortcut, Hyper Key, or an experimental mouse/trackpad gesture. It uses native macOS frameworks, with no runtime dependencies or Dock icon.
+yiyi translates selected text without switching apps. Bring an OpenAI-compatible or Anthropic endpoint, save your prompts as commands, and invoke them with a keyboard shortcut, Hyper Key, or an experimental mouse/trackpad gesture. It uses native macOS frameworks, with no runtime dependencies or Dock icon.
 
 This is a source-build release, not a notarized download. Text is sent to your chosen endpoint; yiyi is not inherently offline.
 

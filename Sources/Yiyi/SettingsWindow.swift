@@ -242,9 +242,11 @@ private enum SettingsPane: String, CaseIterable {
         stretch(status); status.heightAnchor.constraint(greaterThanOrEqualToConstant: 18).isActive = true
         let model = field(provider.model, id: "provider.model")
         let baseURL = field(provider.baseURL, id: "provider.base-url", mono: true)
-        prosePlaceholder("https://api.example.com/v1", in: baseURL)
-        prosePlaceholder("Model name from your server", in: model)
-        var rows = [row("Base URL", baseURL), row("API key", key), row("", status), row("Model", model)]
+        prosePlaceholder(provider.apiStyle.defaultBaseURL, in: baseURL)
+        prosePlaceholder(provider.apiStyle == .anthropic ? "claude-sonnet-4-5" : "Model name from your server", in: model)
+        let style = popup(APIStyle.allCases.map(\.displayName), selected: provider.apiStyle.displayName, id: "provider.api-style", action: #selector(providerStyle(_:)))
+        style.identifier = NSUserInterfaceItemIdentifier(selectedProvider)
+        var rows = [row("API", style), row("Base URL", baseURL), row("API key", key), row("", status), row("Model", model)]
         rows.append(advancedToggle("provider"))
         if expandedAdvanced.contains("provider") {
             let env = field(provider.apiKeyEnv, id: "provider.api-key-env", mono: true)
@@ -253,7 +255,7 @@ private enum SettingsPane: String, CaseIterable {
             rows += [row("Key environment", env), row("Temperature", temperature), row("Reasoning", effort)]
         }
         appendError(for: "provider", to: &rows)
-        return section("OpenAI-compatible connection", rows: rows)
+        return section("Connection", rows: rows)
     }
 
     private func shortcutsPane() -> NSView {
@@ -484,6 +486,17 @@ private enum SettingsPane: String, CaseIterable {
         window?.initialFirstResponder = controls.first
     }
 
+    @objc private func providerStyle(_ sender: NSPopUpButton) {
+        guard let name = sender.identifier?.rawValue, let title = sender.titleOfSelectedItem,
+              let value = APIStyle.allCases.first(where: { $0.displayName == title }),
+              let provider = configs.config.providers[name], provider.apiStyle != value else { return }
+        do {
+            // Swap in the matching public endpoint when the URL is still the other protocol's default.
+            let swapURL = provider.baseURL.isEmpty || provider.baseURL == provider.apiStyle.defaultBaseURL
+            try configs.setProvider(name, baseURL: swapURL ? value.defaultBaseURL : nil, apiStyle: value)
+        } catch { reject(error, at: "provider.api-style"); return }
+        rebuild()
+    }
     @objc private func providerEffort(_ sender: NSPopUpButton) { guard let name = sender.identifier?.rawValue, let value = sender.titleOfSelectedItem.flatMap(ReasoningEffort.init(rawValue:)) else { return }; do { try configs.setProvider(name, reasoningEffort: value) } catch { reject(error, at: "provider.reasoning-effort"); return }; rebuild() }
     @objc private func clearCommandConnection(_ sender: NSButton) {
         do { try configs.setCommand(sender.tag, provider: .some(nil)) }
@@ -645,6 +658,8 @@ private enum SettingsPane: String, CaseIterable {
         rebuild(resize: true, animate: false)
         window?.contentView?.layoutSubtreeIfNeeded()
     }
+    /// The staged, unsaved configuration. Journeys use it to tell staging apart from persistence.
+    var draftConfig: YiyiConfig { configs.config }
     func control(accessibilityID: String) -> NSView? { window?.contentView.flatMap { root in ([root] + root.allSubviews).first { $0.accessibilityIdentifier() == accessibilityID } } }
     func renderPNG(to url: URL, bottom: Bool = false) throws {
         guard let content = window?.contentView?.superview else { return }

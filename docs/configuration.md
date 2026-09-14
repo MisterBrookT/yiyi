@@ -13,7 +13,9 @@ API key lookup order:
 
 An empty key field leaves the existing key unchanged. To remove an inline key, remove its `apiKey` entry through General → Advanced → Edit config file, then reload. Other key sources still apply. The JSON file is mode `0600`; keys are not encrypted. Keep `.env` and `apikey` owner-readable only too.
 
-Base URLs must use HTTP(S), without embedded credentials, query strings, or fragments. Use the API root (usually `/v1`), not `/chat/completions`. The app appends `/chat/completions`. The model must match a model exposed by the endpoint. Provider-specific reasoning support varies; Advanced exposes reasoning effort and temperature. Empty temperature omits it.
+Each connection has an `apiStyle`: `openai` (default, omitted from the file) or `anthropic`. OpenAI-style connections post to `<baseURL>/chat/completions` with a Bearer token; Anthropic connections post to `<baseURL>/messages` with `x-api-key` and `anthropic-version: 2023-06-01`. Switching the API in Settings swaps the base URL only when it still equals the other protocol's public default.
+
+Base URLs must use HTTP(S), without embedded credentials, query strings, or fragments. Use the API root (usually `/v1`), not the endpoint path. The model must match a model exposed by the endpoint. Provider-specific reasoning support varies; Advanced exposes reasoning effort and temperature. Empty temperature omits it. On Anthropic, reasoning effort maps to an extended-thinking budget (minimal 1k, low 2k, medium 8k, high 16k tokens), `none` disables thinking, and temperature is omitted whenever thinking is on because the API rejects the combination.
 
 Commands support optional `provider`, `model`, and `reasoningEffort` overrides. Prompts must contain a supported input token. Substitution is single-pass: token-looking text inside an input is preserved literally, not substituted again.
 
