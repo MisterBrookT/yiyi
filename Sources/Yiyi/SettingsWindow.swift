@@ -146,6 +146,12 @@ private enum SettingsPane: String, CaseIterable {
         item.target = self; item.action = #selector(selectPane(_:))
         return item
     }
+    @objc private func showGeneralPane() {
+        window?.makeFirstResponder(nil)
+        selectedPane = .general
+        window?.toolbar?.selectedItemIdentifier = SettingsPane.general.identifier
+        rebuild(animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
     @objc private func selectPane(_ sender: NSToolbarItem) {
         guard let pane = SettingsPane(rawValue: sender.itemIdentifier.rawValue) else { return }
         window?.makeFirstResponder(nil)
@@ -289,9 +295,15 @@ private enum SettingsPane: String, CaseIterable {
             let superKey = configs.config.superKey
             let hotkey = HotkeyRecorder(value: command.hotkey, allowsSuperKey: superKey != .none && superKey != .externalHyper); hotkey.onCommit = { [weak self] value in self?.commitHotkey(value, index: index) }; hotkey.setAccessibilityIdentifier("command.\(index).hotkey")
             let hint = label(shortcutHint(for: command.hotkey, superKey: superKey), secondary: true); hint.font = .systemFont(ofSize: 11)
-            hint.maximumNumberOfLines = 0; hint.usesSingleLineMode = false; hint.lineBreakMode = .byWordWrapping; hint.preferredMaxLayoutWidth = controlWidth - 160
+            hint.maximumNumberOfLines = 0; hint.usesSingleLineMode = false; hint.lineBreakMode = .byWordWrapping; hint.preferredMaxLayoutWidth = controlWidth - 230; hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             hint.setAccessibilityIdentifier("command.\(index).hotkey-hint")
-            let shortcut = NSStackView(views: [hotkey, hint]); shortcut.orientation = .horizontal; shortcut.spacing = 12; shortcut.alignment = .centerY
+            // The Hyper Key itself is global and lives in General; link there so nobody hunts for it.
+            let hyperLink = NSButton(title: superKey == .none ? "Set up Hyper Key…" : "Change Hyper Key…", target: self, action: #selector(showGeneralPane))
+            hyperLink.isBordered = false; hyperLink.font = .systemFont(ofSize: 11); hyperLink.contentTintColor = .linkColor
+            hyperLink.setAccessibilityIdentifier("command.\(index).hyper-link")
+            let gap = NSView(); gap.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            let shortcut = NSStackView(views: [hotkey, hint, gap, hyperLink]); shortcut.orientation = .horizontal; shortcut.spacing = 12; shortcut.alignment = .centerY
+            shortcut.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true
             let prompt = NSTextView(frame: NSRect(x: 0, y: 0, width: formWidth - 2, height: 188))
             prompt.string = promptDrafts[index] ?? command.prompt
             if let range = promptSelections[index], NSMaxRange(range) <= (prompt.string as NSString).length { prompt.setSelectedRange(range) }
@@ -558,7 +570,7 @@ private enum SettingsPane: String, CaseIterable {
     private func shortcutHint(for hotkey: String, superKey: SuperKey) -> String {
         let isHyper = hotkey.hasPrefix("super+") || hotkey.hasPrefix("hyper+")
         switch superKey {
-        case .none: return isHyper ? "Needs a Hyper Key. Choose one in General → Keyboard." : "Press a key combination."
+        case .none: return isHyper ? "Needs a Hyper Key." : "Press a key combination."
         case .externalHyper: return isHyper ? "Fires with your external ⌃⌥⇧⌘ Hyper Key." : "Press a key combination."
         default: return isHyper ? "Hold \(superKey.displayName), tap the key." : "Press a key combination, or a single key to pair with \(superKey.displayName)."
         }
