@@ -6,9 +6,10 @@ import OSLog
 private let settingsLogger = Logger(subsystem: "cc.blackblue.yiyi", category: "settings")
 
 private enum SettingsPane: String, CaseIterable {
-    case translation = "Translation", commands = "Commands", general = "General"
+    // Ordered the way a user works: write a command, connect a model, then system details.
+    case commands = "Commands", translation = "Connection", general = "General"
     var symbol: String {
-        switch self { case .translation: "character.bubble"; case .commands: "command"; case .general: "gearshape" }
+        switch self { case .commands: "command"; case .translation: "network"; case .general: "gearshape" }
     }
     var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
 }
@@ -33,7 +34,7 @@ private enum SettingsPane: String, CaseIterable {
     private let pointerStatus: () -> String
     private let launchAtLogin: (get: () -> Bool, set: (Bool) -> Void)?
     private let detail = SettingsBackgroundView()
-    private var selectedPane: SettingsPane = .translation
+    private var selectedPane: SettingsPane = .commands
     private var selectedCommand = 0
     private var fieldDrafts: [String: String] = [:]
     private var rebuilding = false

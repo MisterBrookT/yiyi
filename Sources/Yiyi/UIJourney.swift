@@ -66,7 +66,9 @@ import YiyiCore
         try controller.renderPNG(to: outdir.appendingPathComponent(name + ".png"))
     }
     controller.prepareOffscreen(appearance: light)
-    try check("native.toolbar", controller.window?.toolbar?.items.map(\.label) == ["Translation", "Commands", "General"])
+    try check("native.toolbar", controller.window?.toolbar?.items.map(\.label) == ["Commands", "Connection", "General"])
+    try check("opens-on-commands", controller.control(accessibilityID: "commands.selector") != nil)
+    try page("Connection")
     try check("connection.generic", controller.control(accessibilityID: "provider.base-url") != nil && controller.control(accessibilityID: "provider.selector") == nil)
     try check("connection.key-masked-and-shown", try view("provider.api-key", as: NSSecureTextField.self).stringValue == seed.providers["connection"]?.apiKey)
     try press("provider.api-key-reveal")
@@ -80,7 +82,7 @@ import YiyiCore
     try choose("provider.api-style", "OpenAI-compatible")
     try check("connection.style-reverted", try !view("settings.save", as: NSButton.self).isEnabled)
     try check("save.initially-disabled", try !view("settings.save", as: NSButton.self).isEnabled)
-    try snapshot("light-translation")
+    try snapshot("light-connection")
     let frozenRequestConfig = manager.makeDraft()
     try commit("provider.model", "changed-model")
     try commit("provider.api-key", "replacement-test-key")
@@ -130,7 +132,7 @@ import YiyiCore
     try prompt("Typo {selecton}")
     try check("prompt.typo-feedback", try view("command.0.prompt.error", as: NSTextField.self).stringValue.contains("{selecton}"))
     try check("prompt.invalid-blocks-save", try !view("settings.save", as: NSButton.self).isEnabled)
-    try page("Translation"); try page("Commands")
+    try page("Connection"); try page("Commands")
     try check("prompt.invalid-survives-navigation", try view("command.0.prompt", as: NSTextView.self).string == "Typo {selecton}")
     try prompt("Translate: ")
     let insertion = try view("command.0.prompt", as: NSTextView.self); insertion.setSelectedRange(NSRange(location: 11, length: 0))
@@ -207,9 +209,9 @@ import YiyiCore
     try check("config.restored", try persisted() == seed)
     for appearance in [light, dark] {
         controller.prepareOffscreen(appearance: appearance)
-        for title in ["Translation", "Commands", "General"] {
+        for title in ["Commands", "Connection", "General"] {
             try page(title)
-            let id = title == "General" ? "system.advanced" : title == "Translation" ? "provider.advanced" : "command.0.advanced"
+            let id = title == "General" ? "system.advanced" : title == "Connection" ? "provider.advanced" : "command.0.advanced"
             if let toggle = controller.control(accessibilityID: id) as? NSButton, toggle.state == .on { act(toggle) }
             try snapshot("\(appearance == light ? "light" : "dark")-\(title.lowercased())")
         }

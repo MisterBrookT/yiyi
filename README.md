@@ -33,7 +33,7 @@ The installer builds, signs, installs, and opens yiyi. It uses your Developer ID
 
 ## First use
 
-1. Click the **译** icon in the menu bar to open Settings (right-click it to quit). In **Translation**, enter your **Base URL**, **API key**, and **model**, then **Save**.
+1. Click the **译** icon in the menu bar to open Settings (right-click it to quit). In **Connection**, enter your **Base URL**, **API key**, and **model**, then **Save**.
 2. Enable yiyi in **System Settings → Privacy & Security → Accessibility** for selected-text capture. Without it, yiyi uses clipboard text.
 3. Select some text and press **⌘−** to translate into Chinese, or **⌘⇧−** for English. Change these in **Commands**.
 
