@@ -21,7 +21,7 @@ Commands support optional `provider`, `model`, and `reasoningEffort` overrides. 
 
 Shortcuts accept `cmd`, `shift`, `ctrl`, and `opt`, plus a key. `super+t` and `hyper+t` use the selected Hyper Key. Right-side leader keys require Accessibility. External Hyper registers the all-four-modifier chord and requires an existing system remap. Empty shortcuts remain unassigned.
 
-The pointer setting is `"pointerTrigger": {"enabled": false, "commandIndex": 0}`. Old configs decode with the gesture disabled. Deleting commands through Settings updates this index; deleting its target disables the gesture.
+The pointer setting is `"pointerTrigger": {"enabled": false, "commandIndex": 0}`. Old configs decode with the gesture disabled. It is edited from the owning command's card under Commands. Deleting commands through Settings updates this index; deleting its target disables the gesture.
 
 ## Permissions
 

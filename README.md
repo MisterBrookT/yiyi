@@ -47,11 +47,11 @@ Each command has a name, shortcut, and prompt. Changes remain drafts until **Sav
 - `{clipboard}` / `{copy}` — clipboard text from before capture, without synthesizing Copy for clipboard-only prompts.
 - Insert buttons add highlighted tokens at the cursor. Unknown tokens such as `{selecton}` show an error.
 
-The shortcut recorder takes an ordinary modifier combination. With a **Hyper Key** chosen under **General → Keyboard** (a right-side modifier, or an existing external **⌃⌥⇧⌘** remap), pressing a single key records "Hyper Key + key" instead. Selecting External Hyper does not remap Caps Lock or change system keyboard settings.
+Each command card lists its three triggers: **Keyboard** (an ordinary modifier combination), **Hyper Key** (a single key paired with the Hyper Key chosen beside it: a right-side modifier, or an existing external **⌃⌥⇧⌘** remap; that choice applies to every command), and **Trackpad**. Selecting External Hyper does not remap Caps Lock or change system keyboard settings.
 
 ## Mouse and trackpad
 
-In **General → Mouse / trackpad**, opt into **Press and hold** and choose its command. Select text, then press the trackpad or mouse button and hold still for about half a second; the command starts while you are still holding, and you can let go once the panel appears.
+On a command card, check **Press and hold runs this command**. Only one command owns the gesture; checking it elsewhere moves it. Select text, then press the trackpad or mouse button and hold still for about half a second; the command starts while you are still holding, and you can let go once the panel appears.
 
 The experimental gesture uses the selection at press time when Accessibility can read it quickly; otherwise it uses the clipboard. Dragging or another button cancels it. It never consumes normal pointer events. Input Monitoring permission may also be required. It stays **off by default**.
 

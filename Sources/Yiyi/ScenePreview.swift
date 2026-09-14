@@ -123,7 +123,7 @@ let trafficGreen = NSColor(srgbRed: 0.157, green: 0.784, blue: 0.251, alpha: 1)
 /// A compact laptop deck: a few keyboard rows on top, the trackpad directly beneath.
 /// Keys are schematic; only the keys that matter are labelled. Either some keys are pressed
 /// (keyboard shortcut) or a fingertip rests on the trackpad (press-and-hold).
-@MainActor func drawInputDeck(at origin: NSPoint, size: NSSize, pressedKeys: Set<String>, fingerOnTrackpad: Bool) {
+@MainActor func drawInputDeck(at origin: NSPoint, size: NSSize, pressedKeys: Set<String>, fingerOnTrackpad: Bool, rightSide: Bool = false) {
     let ink = NSColor(white: 0.3, alpha: 1)
     let accent = NSColor(srgbRed: 0.0, green: 0.478, blue: 1.0, alpha: 1)
     let body = NSBezierPath(roundedRect: NSRect(origin: origin, size: size), xRadius: 10, yRadius: 10)
@@ -152,8 +152,9 @@ let trafficGreen = NSColor(srgbRed: 0.157, green: 0.784, blue: 0.251, alpha: 1)
             let rect = NSRect(x: x, y: y, width: key.units * unit, height: keyHeight)
             var pressed = !key.label.isEmpty && pressedKeys.contains(key.label)
             if pressed && key.label == "⇧" { if highlightedShiftDone { pressed = false } else { highlightedShiftDone = true } }
-            if pressed && key.label == "⌘" && x > origin.x + size.width / 2 { pressed = false }
-            if pressed && key.label == "⌥" && x > origin.x + size.width / 2 { pressed = false }
+            // Modifiers exist on both sides; light only the side asked for.
+            let onRight = x > origin.x + size.width / 2
+            if pressed && (key.label == "⌘" || key.label == "⌥") && onRight != rightSide { pressed = false }
             let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
             (pressed ? accent : NSColor.white).setFill(); path.fill()
             (pressed ? accent : NSColor(white: 0, alpha: 0.09)).setStroke(); path.lineWidth = 0.5; path.stroke()
@@ -192,12 +193,12 @@ let trafficGreen = NSColor(srgbRed: 0.157, green: 0.784, blue: 0.251, alpha: 1)
 }
 
 /// The deck as a standalone image for Settings. Drawn at the view's backing scale, so it stays crisp.
-@MainActor func inputDeckImage(pressedKeys: Set<String>, fingerOnTrackpad: Bool, size: NSSize = NSSize(width: 150, height: 85)) -> NSImage {
+@MainActor func inputDeckImage(pressedKeys: Set<String>, fingerOnTrackpad: Bool, size: NSSize = NSSize(width: 150, height: 85), rightSide: Bool = false) -> NSImage {
     let full = NSSize(width: 236, height: 134)
     return NSImage(size: size, flipped: false) { _ in
         let scale = size.width / full.width
         NSGraphicsContext.current?.cgContext.scaleBy(x: scale, y: scale)
-        drawInputDeck(at: .zero, size: full, pressedKeys: pressedKeys, fingerOnTrackpad: fingerOnTrackpad)
+        drawInputDeck(at: .zero, size: full, pressedKeys: pressedKeys, fingerOnTrackpad: fingerOnTrackpad, rightSide: rightSide)
         return true
     }
 }
